@@ -75,8 +75,10 @@ final class DoctrineEventStore implements EventStoreInterface, ProvidesSetupInte
                 $expectedVersion->verifyVersion($maybeVersion);
                 $version = $maybeVersion->isNothing() ? Version::first() : $maybeVersion->unwrap()->next();
                 $now = new \DateTimeImmutable('now');
+                $lastCommittedVersion = null;
                 foreach ($events as $event) {
                     $this->commitEvent($streamName, $event, $version, $now);
+                    $lastCommittedVersion = $version;
                     $version = $version->next();
                 }
                 $lastInsertId = $this->connection->lastInsertId();
@@ -84,7 +86,7 @@ final class DoctrineEventStore implements EventStoreInterface, ProvidesSetupInte
                     throw new \RuntimeException(sprintf('Expected last insert id to be numeric, but it is: %s', get_debug_type($lastInsertId)), 1651749706);
                 }
                 $this->connection->commit();
-                return new CommitResult($version, SequenceNumber::fromInteger((int)$lastInsertId));
+                return new CommitResult($lastCommittedVersion, SequenceNumber::fromInteger((int)$lastInsertId));
             } catch (UniqueConstraintViolationException $exception) {
                 if ($retryAttempt >= $maxRetryAttempts) {
                     $this->connection->rollBack();
