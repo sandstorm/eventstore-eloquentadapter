@@ -13,7 +13,7 @@ use Doctrine\DBAL\Schema\SchemaConfig;
 use Doctrine\DBAL\Types\Types;
 use Neos\EventStore\EventStoreInterface;
 use Neos\EventStore\Exception\ConcurrencyException;
-use Neos\EventStore\Helper\BatchEventStreamInterface;
+use Neos\EventStore\Helper\BatchEventStream;
 use Neos\EventStore\Model\EventStore\CommitResult;
 use Neos\EventStore\Model\EventStream\EventStreamInterface;
 use Neos\EventStore\Model\EventStream\ExpectedVersion;
@@ -54,7 +54,7 @@ final class DoctrineEventStore implements EventStoreInterface, ProvidesSetupInte
             },
             default => $queryBuilder,
         };
-        return BatchEventStreamInterface::create(DoctrineEventStream::create($queryBuilder), 100);
+        return BatchEventStream::create(DoctrineEventStream::create($queryBuilder), 100);
     }
 
     public function commit(StreamName $streamName, Events $events, ExpectedVersion $expectedVersion): CommitResult
@@ -75,7 +75,7 @@ final class DoctrineEventStore implements EventStoreInterface, ProvidesSetupInte
                 $expectedVersion->verifyVersion($maybeVersion);
                 $version = $maybeVersion->isNothing() ? Version::first() : $maybeVersion->unwrap()->next();
                 $now = new \DateTimeImmutable('now');
-                $lastCommittedVersion = null;
+                $lastCommittedVersion = $version;
                 foreach ($events as $event) {
                     $this->commitEvent($streamName, $event, $version, $now);
                     $lastCommittedVersion = $version;
