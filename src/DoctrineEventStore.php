@@ -13,7 +13,7 @@ use Doctrine\DBAL\Schema\SchemaConfig;
 use Doctrine\DBAL\Types\Types;
 use Neos\EventStore\EventStoreInterface;
 use Neos\EventStore\Exception\ConcurrencyException;
-use Neos\EventStore\Helper\BatchEventStreamInterface;
+use Neos\EventStore\Helper\BatchEventStream;
 use Neos\EventStore\Model\EventStore\CommitResult;
 use Neos\EventStore\Model\EventStream\EventStreamInterface;
 use Neos\EventStore\Model\EventStream\ExpectedVersion;
@@ -54,7 +54,7 @@ final class DoctrineEventStore implements EventStoreInterface, ProvidesSetupInte
             },
             default => $queryBuilder,
         };
-        return BatchEventStreamInterface::create(DoctrineEventStream::create($queryBuilder), 100);
+        return BatchEventStream::create(DoctrineEventStream::create($queryBuilder), 100);
     }
 
     public function commit(StreamName $streamName, Events $events, ExpectedVersion $expectedVersion): CommitResult
@@ -75,8 +75,10 @@ final class DoctrineEventStore implements EventStoreInterface, ProvidesSetupInte
                 $expectedVersion->verifyVersion($maybeVersion);
                 $version = $maybeVersion->isNothing() ? Version::first() : $maybeVersion->unwrap()->next();
                 $now = new \DateTimeImmutable('now');
+                $lastCommittedVersion = $version;
                 foreach ($events as $event) {
                     $this->commitEvent($streamName, $event, $version, $now);
+                    $lastCommittedVersion = $version;
                     $version = $version->next();
                 }
                 $lastInsertId = $this->connection->lastInsertId();
@@ -84,7 +86,7 @@ final class DoctrineEventStore implements EventStoreInterface, ProvidesSetupInte
                     throw new \RuntimeException(sprintf('Expected last insert id to be numeric, but it is: %s', get_debug_type($lastInsertId)), 1651749706);
                 }
                 $this->connection->commit();
-                return new CommitResult($version, SequenceNumber::fromInteger((int)$lastInsertId));
+                return new CommitResult($lastCommittedVersion, SequenceNumber::fromInteger((int)$lastInsertId));
             } catch (UniqueConstraintViolationException $exception) {
                 if ($retryAttempt >= $maxRetryAttempts) {
                     $this->connection->rollBack();
