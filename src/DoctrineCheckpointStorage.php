@@ -22,7 +22,6 @@ final class DoctrineCheckpointStorage implements CheckpointStorageInterface, Pro
 {
 
     private MySqlPlatform|PostgreSqlPlatform $platform;
-    private bool $lockAcquired = false;
     private SequenceNumber|null $lockedSequenceNumber = null;
 
     public function __construct(
@@ -61,21 +60,20 @@ final class DoctrineCheckpointStorage implements CheckpointStorageInterface, Pro
             $this->connection->rollBack();
             throw new CheckpointException(sprintf('Failed to fetch highest applied sequence number for subscriber "%s". Please run %s::setup()', $this->subscriberId, $this::class), 1652279139);
         }
-        $this->lockAcquired = true;
         $this->lockedSequenceNumber = SequenceNumber::fromInteger((int)$highestAppliedSequenceNumber);
         return $this->lockedSequenceNumber;
     }
 
     public function updateAndReleaseLock(SequenceNumber $sequenceNumber): void
     {
-        if (!$this->lockAcquired) {
+        if ($this->lockedSequenceNumber === null) {
             throw new CheckpointException(sprintf('Failed to update and commit checkpoint for subscriber "%s" because the lock has not been acquired successfully before', $this->subscriberId), 1660556344);
         }
         if (!$this->connection->isTransactionActive()) {
             throw new CheckpointException(sprintf('Failed to update and commit checkpoint for subscriber "%s" because no transaction is active', $this->subscriberId), 1652279314);
         }
         try {
-            if ($this->lockedSequenceNumber === null || !$this->lockedSequenceNumber->equals($sequenceNumber)) {
+            if (!$this->lockedSequenceNumber->equals($sequenceNumber)) {
                 $this->connection->update($this->tableName, ['appliedsequencenumber' => $sequenceNumber->value], ['subscriberid' => $this->subscriberId]);
             }
             $this->connection->commit();
@@ -83,7 +81,6 @@ final class DoctrineCheckpointStorage implements CheckpointStorageInterface, Pro
             $this->connection->rollBack();
             throw new CheckpointException(sprintf('Failed to update and commit highest applied sequence number for subscriber "%s". Please run %s::setup()', $this->subscriberId, $this::class), 1652279375, $exception);
         } finally {
-            $this->lockAcquired = false;
             $this->lockedSequenceNumber = null;
         }
     }

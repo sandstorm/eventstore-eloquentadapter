@@ -29,10 +29,10 @@ final class DoctrineCheckpointStorageTest extends TestCase
 
     private function simulateLockAcquired(): void
     {
-        $bound = \Closure::bind(static fn &(DoctrineCheckpointStorage $checkpointStorage) => $checkpointStorage->lockAcquired, null, $this->checkpointStorage);
+        $bound = \Closure::bind(static fn &(DoctrineCheckpointStorage $checkpointStorage) => $checkpointStorage->lockedSequenceNumber, null, $this->checkpointStorage);
         /** @noinspection PhpPassByRefInspection */
         $ref = &$bound($this->checkpointStorage);
-        $ref = true;
+        $ref = SequenceNumber::none();
         $this->mockConnection->method('isTransactionActive')->willReturn(true);
     }
 
