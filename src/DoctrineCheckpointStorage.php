@@ -84,6 +84,7 @@ final class DoctrineCheckpointStorage implements CheckpointStorageInterface, Pro
             throw new CheckpointException(sprintf('Failed to update and commit highest applied sequence number for subscriber "%s". Please run %s::setup()', $this->subscriberId, $this::class), 1652279375, $exception);
         } finally {
             $this->lockAcquired = false;
+            $this->lockedSequenceNumber = null;
         }
     }
 
