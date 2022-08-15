@@ -3,9 +3,11 @@ declare(strict_types=1);
 namespace Neos\EventStore\DoctrineAdapter;
 
 use Doctrine\DBAL\Connection;
-use Doctrine\DBAL\Driver\Exception as DriverException;
-use Doctrine\DBAL\Exception as DbalException;
+use Doctrine\DBAL\Exception as DBALException;
+use Doctrine\DBAL\Exception\LockWaitTimeoutException;
 use Doctrine\DBAL\Exception\UniqueConstraintViolationException;
+use Doctrine\DBAL\Platforms\MySqlPlatform;
+use Doctrine\DBAL\Platforms\PostgreSqlPlatform;
 use Doctrine\DBAL\Schema\AbstractSchemaManager;
 use Doctrine\DBAL\Schema\Comparator;
 use Doctrine\DBAL\Schema\Schema;
@@ -19,11 +21,23 @@ use Neos\EventStore\ProvidesSetupInterface;
 final class DoctrineCheckpointStorage implements CheckpointStorageInterface, ProvidesSetupInterface
 {
 
+    private MySqlPlatform|PostgreSqlPlatform $platform;
+    private SequenceNumber|null $lockedSequenceNumber = null;
+
     public function __construct(
         private readonly Connection $connection,
         private readonly string $tableName,
         private readonly string $subscriberId,
-    ) {}
+    ) {
+        $platform = $this->connection->getDatabasePlatform();
+        if ($platform === null) {
+            throw new \InvalidArgumentException(sprintf('Failed to determine database platform for database "%s"', $this->connection->getDatabase()), 1660555815);
+        }
+        if (!($platform instanceof MySqlPlatform || $platform instanceof PostgreSqlPlatform)) {
+            throw new \InvalidArgumentException(sprintf('The %s only supports the platforms %s and %s currently. Given: %s', $this::class, MySqlPlatform::class, PostgreSqlPlatform::class, get_debug_type($platform)), 1660556004);
+        }
+        $this->platform = $platform;
+    }
 
     public function acquireLock(): SequenceNumber
     {
@@ -32,42 +46,42 @@ final class DoctrineCheckpointStorage implements CheckpointStorageInterface, Pro
         }
         $this->connection->beginTransaction();
         try {
-            $highestAppliedSequenceNumber = $this->connection->fetchOne('SELECT appliedsequencenumber FROM ' . $this->connection->quoteIdentifier($this->tableName) . ' WHERE subscriberid = :subscriberId ' . $this->connection->getDatabasePlatform()->getForUpdateSQL() . ' NOWAIT', [
+            $highestAppliedSequenceNumber = $this->connection->fetchOne('SELECT appliedsequencenumber FROM ' . $this->connection->quoteIdentifier($this->tableName) . ' WHERE subscriberid = :subscriberId ' . $this->platform->getForUpdateSQL() . ' NOWAIT', [
                 'subscriberId' => $this->subscriberId
             ]);
-        } catch (DriverException $exception) {
-            // Error code "1205" = ER_LOCK_WAIT_TIMEOUT in MySQL (https://dev.mysql.com/doc/refman/8.0/en/server-error-reference.html#error_er_lock_wait_timeout)
-            // SQL State "55P03" = lock_not_available in PostgreSQL (https://www.postgresql.org/docs/9.4/errcodes-appendix.html)
-            if ($exception->getErrorCode() === 1205 || $exception->getSQLState() === '55P03') {
-                throw new CheckpointException(sprintf('Failed to acquire checkpoint lock for subscriber "%s" because it is acquired already', $this->subscriberId), 1652279016);
-            }
-            throw new \RuntimeException($exception->getMessage(), 1544207633, $exception);
-        } catch (DBALException $exception) {
-            throw new \RuntimeException($exception->getMessage(), 1544207778, $exception);
-        } finally {
+        } catch (LockWaitTimeoutException $exception) {
             $this->connection->rollBack();
+            throw new CheckpointException(sprintf('Failed to acquire checkpoint lock for subscriber "%s" because it is acquired already', $this->subscriberId), 1652279016);
+        } catch (DBALException $exception) {
+            $this->connection->rollBack();
+            throw new \RuntimeException($exception->getMessage(), 1544207778, $exception);
         }
         if (!is_numeric($highestAppliedSequenceNumber)) {
+            $this->connection->rollBack();
             throw new CheckpointException(sprintf('Failed to fetch highest applied sequence number for subscriber "%s". Please run %s::setup()', $this->subscriberId, $this::class), 1652279139);
         }
-        return SequenceNumber::fromInteger((int)$highestAppliedSequenceNumber);
+        $this->lockedSequenceNumber = SequenceNumber::fromInteger((int)$highestAppliedSequenceNumber);
+        return $this->lockedSequenceNumber;
     }
 
     public function updateAndReleaseLock(SequenceNumber $sequenceNumber): void
     {
-        // TODO check for active transaction?
-//        if (!$this->connection->isTransactionActive()) {
-//            throw new CheckpointException(sprintf('Failed to update and commit checkpoint for subscriber "%s" because no transaction is active', $this->subscriberId), 1652279314);
-//        }
-        // Fails if no matching entry exists; which is fine because initializeHighestAppliedSequenceNumber() must be called beforehand.
+        if ($this->lockedSequenceNumber === null) {
+            throw new CheckpointException(sprintf('Failed to update and commit checkpoint for subscriber "%s" because the lock has not been acquired successfully before', $this->subscriberId), 1660556344);
+        }
+        if (!$this->connection->isTransactionActive()) {
+            throw new CheckpointException(sprintf('Failed to update and commit checkpoint for subscriber "%s" because no transaction is active', $this->subscriberId), 1652279314);
+        }
         try {
-            $this->connection->update(
-                $this->tableName,
-                ['appliedsequencenumber' => $sequenceNumber->value],
-                ['subscriberid' => $this->subscriberId]
-            );
+            if (!$this->lockedSequenceNumber->equals($sequenceNumber)) {
+                $this->connection->update($this->tableName, ['appliedsequencenumber' => $sequenceNumber->value], ['subscriberid' => $this->subscriberId]);
+            }
+            $this->connection->commit();
         } catch (DBALException $exception) {
+            $this->connection->rollBack();
             throw new CheckpointException(sprintf('Failed to update and commit highest applied sequence number for subscriber "%s". Please run %s::setup()', $this->subscriberId, $this::class), 1652279375, $exception);
+        } finally {
+            $this->lockedSequenceNumber = null;
         }
     }
 
@@ -95,7 +109,7 @@ final class DoctrineCheckpointStorage implements CheckpointStorageInterface, Pro
         $table->setPrimaryKey(['subscriberid']);
 
         $schemaDiff = (new Comparator())->compare($schemaManager->createSchema(), $schema);
-        foreach ($schemaDiff->toSaveSql($this->connection->getDatabasePlatform()) as $statement) {
+        foreach ($schemaDiff->toSaveSql($this->platform) as $statement) {
             $this->connection->executeStatement($statement);
         }
         try {
