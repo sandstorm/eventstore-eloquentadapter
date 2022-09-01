@@ -50,7 +50,7 @@ final class DoctrineEventStore implements EventStoreInterface, ProvidesSetupInte
             VirtualStreamName::class => match ($streamName->type) {
                 VirtualStreamType::ALL => $queryBuilder,
                 VirtualStreamType::CATEGORY => $queryBuilder->andWhere('stream LIKE :streamNamePrefix')->setParameter('streamNamePrefix', $streamName->value . '%'),
-                VirtualStreamType::CORRELATION_ID => $queryBuilder->andWhere('correlationIdentifier LIKE :correlationId')->setParameter('correlationId', $streamName->value),
+                VirtualStreamType::CORRELATION_ID => $queryBuilder->andWhere('correlationId LIKE :correlationId')->setParameter('correlationId', $streamName->value),
             },
             default => $queryBuilder,
         };
@@ -167,16 +167,16 @@ final class DoctrineEventStore implements EventStoreInterface, ProvidesSetupInte
         // The unique event id, usually a UUID
         $table->addColumn('id', Types::STRING, ['length' => 255]);
         // An optional correlation id, usually a UUID
-        $table->addColumn('correlationidentifier', Types::STRING, ['length' => 255, 'notnull' => false]);
+        $table->addColumn('correlationid', Types::STRING, ['length' => 255, 'notnull' => false]);
         // An optional causation id, usually a UUID
-        $table->addColumn('causationidentifier', Types::STRING, ['length' => 255, 'notnull' => false]);
+        $table->addColumn('causationid', Types::STRING, ['length' => 255, 'notnull' => false]);
         // Timestamp of the the event publishing
         $table->addColumn('recordedat', Types::DATETIME_IMMUTABLE);
 
         $table->setPrimaryKey(['sequencenumber']);
         $table->addUniqueIndex(['id'], 'id_uniq');
         $table->addUniqueIndex(['stream', 'version'], 'stream_version_uniq');
-        $table->addIndex(['correlationidentifier']);
+        $table->addIndex(['correlationid']);
 
         return $schema;
     }
@@ -214,8 +214,8 @@ final class DoctrineEventStore implements EventStoreInterface, ProvidesSetupInte
                 'type' => $event->type->value,
                 'payload' => $event->data->value,
                 'metadata' => $event->metadata->toJson(),
-                'correlationidentifier' => $event->metadata->get('correlationIdentifier'),
-                'causationidentifier' => $event->metadata->get('causationIdentifier'),
+                'correlationid' => $event->metadata->get('correlationId'),
+                'causationid' => $event->metadata->get('causationId'),
                 'recordedat' => $now,
             ],
             [
