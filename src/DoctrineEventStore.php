@@ -2,6 +2,7 @@
 declare(strict_types=1);
 namespace Neos\EventStore\DoctrineAdapter;
 
+use DateTimeImmutable;
 use Doctrine\DBAL\Connection;
 use Doctrine\DBAL\Driver\Exception as DriverException;
 use Doctrine\DBAL\Exception as DbalException;
@@ -29,13 +30,24 @@ use Neos\EventStore\Model\Event;
 use Neos\EventStore\Model\Events;
 use Neos\EventStore\ProvidesStatusInterface;
 use Neos\EventStore\ProvidesSetupInterface;
+use Psr\Clock\ClockInterface;
 
 final class DoctrineEventStore implements EventStoreInterface, ProvidesSetupInterface, ProvidesStatusInterface
 {
+    private readonly ClockInterface $clock;
+
     public function __construct(
         private readonly Connection $connection,
         private readonly string $eventTableName,
-    ) {}
+        ClockInterface $clock = null
+    ) {
+        $this->clock = $clock ?? new class implements ClockInterface {
+            public function now(): DateTimeImmutable
+            {
+                return new DateTimeImmutable();
+            }
+        };
+    }
 
     public function load(VirtualStreamName|StreamName $streamName): EventStreamInterface
     {
@@ -74,10 +86,9 @@ final class DoctrineEventStore implements EventStoreInterface, ProvidesSetupInte
                 $maybeVersion = $this->getStreamVersion($streamName);
                 $expectedVersion->verifyVersion($maybeVersion);
                 $version = $maybeVersion->isNothing() ? Version::first() : $maybeVersion->unwrap()->next();
-                $now = new \DateTimeImmutable('now');
                 $lastCommittedVersion = $version;
                 foreach ($events as $event) {
-                    $this->commitEvent($streamName, $event, $version, $now);
+                    $this->commitEvent($streamName, $event, $version);
                     $lastCommittedVersion = $version;
                     $version = $version->next();
                 }
@@ -203,7 +214,7 @@ final class DoctrineEventStore implements EventStoreInterface, ProvidesSetupInte
     /**
      * @throws DbalException | UniqueConstraintViolationException| \JsonException
      */
-    private function commitEvent(StreamName $streamName, Event $event, Version $version, \DateTimeImmutable $now): void
+    private function commitEvent(StreamName $streamName, Event $event, Version $version): void
     {
         $this->connection->insert(
             $this->eventTableName,
@@ -216,7 +227,7 @@ final class DoctrineEventStore implements EventStoreInterface, ProvidesSetupInte
                 'metadata' => $event->metadata->toJson(),
                 'correlationid' => $event->metadata->get('correlationId'),
                 'causationid' => $event->metadata->get('causationId'),
-                'recordedat' => $now,
+                'recordedat' => $this->clock->now(),
             ],
             [
                 'version' => Types::INTEGER,

@@ -5,7 +5,8 @@
     "require": {
         "neos/eventstore": "*",
         "doctrine/dbal": "^2 || ^3",
-        "webmozart/assert": "^1.10"
+        "webmozart/assert": "^1.10",
+        "psr/clock": "^1"
     },
     "require-dev": {
         "roave/security-advisories": "dev-latest",
