@@ -76,7 +76,7 @@ final class DoctrineEventStream implements EventStreamInterface
             $queryBuilder = $queryBuilder->setMaxResults($this->limit);
         }
         if ($this->backwards) {
-            $queryBuilder = $queryBuilder->orderBy('sequencenumber DESC');
+            $queryBuilder = $queryBuilder->orderBy('sequencenumber', 'DESC');
         }
 
         $this->reconnectDatabaseConnection();
