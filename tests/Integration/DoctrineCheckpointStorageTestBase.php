@@ -6,9 +6,9 @@ use Doctrine\DBAL\Connection;
 use Doctrine\DBAL\DriverManager;
 use Neos\EventStore\DoctrineAdapter\DoctrineCheckpointStorage;
 use Neos\EventStore\Model\Event\SequenceNumber;
-use Neos\EventStore\Tests\AbstractCheckpointStorageTest;
+use Neos\EventStore\Tests\AbstractCheckpointStorageTestBase;
 
-final class DoctrineCheckpointStorageTest extends AbstractCheckpointStorageTest
+final class DoctrineCheckpointStorageTestBase extends AbstractCheckpointStorageTestBase
 {
     private static string $dbDns;
 

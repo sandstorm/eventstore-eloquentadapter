@@ -5,9 +5,9 @@ namespace Neos\EventStore\DoctrineAdapter\Tests\Integration;
 use Doctrine\DBAL\DriverManager;
 use Neos\EventStore\DoctrineAdapter\DoctrineEventStore;
 use Neos\EventStore\EventStoreInterface;
-use Neos\EventStore\Tests\AbstractEventStoreTest;
+use Neos\EventStore\Tests\AbstractEventStoreTestBase;
 
-final class DoctrineEventStoreTest extends AbstractEventStoreTest
+final class DoctrineEventStoreTestBase extends AbstractEventStoreTestBase
 {
 
     protected function createEventStore(): EventStoreInterface
