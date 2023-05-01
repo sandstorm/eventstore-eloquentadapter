@@ -15,21 +15,22 @@ use Doctrine\DBAL\Types\Types;
 use Neos\EventStore\EventStoreInterface;
 use Neos\EventStore\Exception\ConcurrencyException;
 use Neos\EventStore\Helper\BatchEventStream;
+use Neos\EventStore\Model\Event;
+use Neos\EventStore\Model\Event\SequenceNumber;
+use Neos\EventStore\Model\Event\StreamName;
+use Neos\EventStore\Model\Event\Version;
+use Neos\EventStore\Model\Events;
 use Neos\EventStore\Model\EventStore\CommitResult;
+use Neos\EventStore\Model\EventStore\SetupResult;
+use Neos\EventStore\Model\EventStore\Status;
+use Neos\EventStore\Model\EventStream\EventStreamFilter;
 use Neos\EventStore\Model\EventStream\EventStreamInterface;
 use Neos\EventStore\Model\EventStream\ExpectedVersion;
 use Neos\EventStore\Model\EventStream\MaybeVersion;
-use Neos\EventStore\Model\Event\SequenceNumber;
-use Neos\EventStore\Model\EventStore\SetupResult;
-use Neos\EventStore\Model\EventStore\Status;
-use Neos\EventStore\Model\Event\StreamName;
-use Neos\EventStore\Model\Event\Version;
 use Neos\EventStore\Model\EventStream\VirtualStreamName;
 use Neos\EventStore\Model\EventStream\VirtualStreamType;
-use Neos\EventStore\Model\Event;
-use Neos\EventStore\Model\Events;
-use Neos\EventStore\ProvidesStatusInterface;
 use Neos\EventStore\ProvidesSetupInterface;
+use Neos\EventStore\ProvidesStatusInterface;
 use Psr\Clock\ClockInterface;
 
 final class DoctrineEventStore implements EventStoreInterface, ProvidesSetupInterface, ProvidesStatusInterface
@@ -49,7 +50,7 @@ final class DoctrineEventStore implements EventStoreInterface, ProvidesSetupInte
         };
     }
 
-    public function load(VirtualStreamName|StreamName $streamName): EventStreamInterface
+    public function load(VirtualStreamName|StreamName $streamName, EventStreamFilter $filter = null): EventStreamInterface
     {
         $this->reconnectDatabaseConnection();
         $queryBuilder = $this->connection->createQueryBuilder()
@@ -66,6 +67,9 @@ final class DoctrineEventStore implements EventStoreInterface, ProvidesSetupInte
             },
             default => $queryBuilder,
         };
+        if ($filter !== null && $filter->eventTypes !== null) {
+            $queryBuilder->andWhere('type IN (:eventTypes)')->setParameter('eventTypes', $filter->eventTypes->toStringArray(), Connection::PARAM_STR_ARRAY);
+        }
         return BatchEventStream::create(DoctrineEventStream::create($queryBuilder), 100);
     }
 
