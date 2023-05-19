@@ -8,7 +8,7 @@ use Neos\EventStore\DoctrineAdapter\DoctrineCheckpointStorage;
 use Neos\EventStore\Model\Event\SequenceNumber;
 use Neos\EventStore\Tests\AbstractCheckpointStorageTestBase;
 
-final class DoctrineCheckpointStorageTestBase extends AbstractCheckpointStorageTestBase
+final class DoctrineCheckpointStorageTest extends AbstractCheckpointStorageTestBase
 {
     private static string $dbDns;
 

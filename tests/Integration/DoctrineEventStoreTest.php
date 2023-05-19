@@ -7,7 +7,7 @@ use Neos\EventStore\DoctrineAdapter\DoctrineEventStore;
 use Neos\EventStore\EventStoreInterface;
 use Neos\EventStore\Tests\AbstractEventStoreTestBase;
 
-final class DoctrineEventStoreTestBase extends AbstractEventStoreTestBase
+final class DoctrineEventStoreTest extends AbstractEventStoreTestBase
 {
 
     protected function createEventStore(): EventStoreInterface
