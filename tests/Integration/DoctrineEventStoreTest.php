@@ -8,7 +8,7 @@ use Doctrine\DBAL\Platforms\PostgreSQLPlatform;
 use Doctrine\DBAL\Platforms\SqlitePlatform;
 use Neos\EventStore\DoctrineAdapter\DoctrineEventStore;
 use Neos\EventStore\EventStoreInterface;
-use Neos\EventStore\Tests\AbstractEventStoreTestBase;
+use Neos\EventStore\Tests\Integration\AbstractEventStoreTestBase;
 use PHPUnit\Framework\Attributes\CoversClass;
 
 #[CoversClass(DoctrineEventStore::class)]

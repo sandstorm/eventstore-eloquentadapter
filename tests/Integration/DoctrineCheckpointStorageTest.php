@@ -6,7 +6,7 @@ use Doctrine\DBAL\Connection;
 use Doctrine\DBAL\DriverManager;
 use Neos\EventStore\DoctrineAdapter\DoctrineCheckpointStorage;
 use Neos\EventStore\Model\Event\SequenceNumber;
-use Neos\EventStore\Tests\AbstractCheckpointStorageTestBase;
+use Neos\EventStore\Tests\Integration\AbstractCheckpointStorageTestBase;
 use PHPUnit\Framework\Attributes\CoversClass;
 
 #[CoversClass(DoctrineCheckpointStorage::class)]
