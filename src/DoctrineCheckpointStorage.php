@@ -30,9 +30,6 @@ final class DoctrineCheckpointStorage implements CheckpointStorageInterface, Pro
         private readonly string $subscriberId,
     ) {
         $platform = $this->connection->getDatabasePlatform();
-        if ($platform === null) {
-            throw new \InvalidArgumentException(sprintf('Failed to determine database platform for database "%s"', $this->connection->getDatabase()), 1660555815);
-        }
         if (!($platform instanceof MySqlPlatform || $platform instanceof PostgreSqlPlatform)) {
             throw new \InvalidArgumentException(sprintf('The %s only supports the platforms %s and %s currently. Given: %s', $this::class, MySqlPlatform::class, PostgreSqlPlatform::class, get_debug_type($platform)), 1660556004);
         }
