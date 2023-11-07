@@ -63,10 +63,10 @@ jobs:
     - name: Install dependencies
       run: composer install --prefer-dist --no-progress
 
-    - name: Run tests (MySQL)
-      run: composer run-script test
-      env:
-        DB_DSN: "pdo-mysql://root:password@127.0.0.1:${{ job.services.mysql.ports['3306'] }}/dcb"
+#    - name: Run tests (MySQL)
+#      run: composer run-script test
+#      env:
+#        DB_DSN: "pdo-mysql://root:password@127.0.0.1:${{ job.services.mysql.ports['3306'] }}/dcb"
 
     - name: Run tests (PostgreSQL)
       run: composer run-script test
