@@ -80,7 +80,7 @@ final class DoctrineEventStoreTest extends AbstractEventStoreTestBase
         $connection = self::connection();
         $eventStore = new DoctrineEventStore($connection, self::eventTableName());
         $eventStore->setup();
-        $connection->executeStatement('ALTER TABLE ' . $connection->quote(self::eventTableName()) . ' RENAME COLUMN metadata TO metadata_renamed');
+        $connection->executeStatement('ALTER TABLE ' . self::eventTableName() . ' RENAME COLUMN metadata TO metadata_renamed');
         self::assertSame($eventStore->status()->type, StatusType::SETUP_REQUIRED);
     }
 
