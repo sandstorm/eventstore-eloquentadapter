@@ -3,8 +3,7 @@
 Database Adapter implementation for the [neos/eventstore](https://github.com/neos/eventstore) package.
 
 > **Note**
-> Currently this package supports MySQL (including MariaDB) and PostgreSQL
-> The `DoctrineEventStore` can be used with SQLite, too. But that platform is not yet supported for the `DoctrineCheckpointStorage`
+> Currently this package supports MySQL (including MariaDB), PostgreSQL and SQLite.
 
 ## Usage
 
