@@ -3,8 +3,8 @@ declare(strict_types=1);
 namespace Neos\EventStore\DoctrineAdapter;
 
 use Doctrine\DBAL\Connection;
-use Doctrine\DBAL\Exception\DriverException as DBALDriverException;
 use Doctrine\DBAL\Exception as DBALException;
+use Doctrine\DBAL\Exception\DriverException as DBALDriverException;
 use Doctrine\DBAL\Exception\LockWaitTimeoutException;
 use Doctrine\DBAL\Exception\UniqueConstraintViolationException;
 use Doctrine\DBAL\Platforms\MySqlPlatform;
@@ -16,10 +16,8 @@ use Doctrine\DBAL\Types\Types;
 use Neos\EventStore\CatchUp\CheckpointStorageInterface;
 use Neos\EventStore\Exception\CheckpointException;
 use Neos\EventStore\Model\Event\SequenceNumber;
-use Neos\EventStore\Model\EventStore\SetupResult;
-use Neos\EventStore\ProvidesSetupInterface;
 
-final class DoctrineCheckpointStorage implements CheckpointStorageInterface, ProvidesSetupInterface
+final class DoctrineCheckpointStorage implements CheckpointStorageInterface
 {
 
     private MySqlPlatform|PostgreSqlPlatform $platform;
@@ -94,7 +92,7 @@ final class DoctrineCheckpointStorage implements CheckpointStorageInterface, Pro
         return SequenceNumber::fromInteger((int)$highestAppliedSequenceNumber);
     }
 
-    public function setup(): SetupResult
+    public function setup(): void
     {
         $schemaManager = $this->connection->getSchemaManager();
         if (!$schemaManager instanceof AbstractSchemaManager) {
@@ -115,7 +113,5 @@ final class DoctrineCheckpointStorage implements CheckpointStorageInterface, Pro
         } catch (UniqueConstraintViolationException $e) {
             // table and row already exists, ignore
         }
-
-        return SetupResult::success('');
     }
 }
