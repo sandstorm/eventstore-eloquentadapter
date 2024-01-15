@@ -18,12 +18,14 @@ final class DoctrineEventStoreTest extends AbstractEventStoreTestBase
 {
     private static ?Connection $connection = null;
 
-    protected function createEventStore(): EventStoreInterface
+    protected static function createEventStore(): EventStoreInterface
+    {
+        return new DoctrineEventStore(self::connection(), self::eventTableName());
+    }
+
+    protected static function resetEventStore(): void
     {
         $connection = self::connection();
-        $eventStore = new DoctrineEventStore($connection, self::eventTableName());
-        $eventStore->setup();
-
         if ($connection->getDatabasePlatform() instanceof SqlitePlatform) {
             $connection->executeStatement('DELETE FROM ' . self::eventTableName());
             $connection->executeStatement('UPDATE SQLITE_SEQUENCE SET SEQ=0 WHERE NAME="' . self::eventTableName() . '"');
@@ -32,7 +34,6 @@ final class DoctrineEventStoreTest extends AbstractEventStoreTestBase
         } else {
             $connection->executeStatement('TRUNCATE TABLE ' . self::eventTableName());
         }
-        return $eventStore;
     }
 
     public static function connection(): Connection

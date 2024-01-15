@@ -38,11 +38,17 @@
         "test:phpstan": "phpstan",
         "test:cs": "phpcs --colors src",
         "test:cs:fix": "phpcbf --colors src",
-        "test:integration": "phpunit tests/Integration",
+        "test:integration": "phpunit tests/Integration --exclude-group=parallel",
+        "test:consistency": [
+            "Neos\\EventStore\\DoctrineAdapter\\Tests\\Integration\\DoctrineEventStoreTest::prepare",
+            "paratest tests/Integration --group=parallel --functional --processes 10",
+            "Neos\\EventStore\\DoctrineAdapter\\Tests\\Integration\\DoctrineEventStoreTest::consistency_validateEvents"
+        ],
         "test": [
             "@test:phpstan",
             "@test:cs",
-            "@test:integration"
+            "@test:integration",
+            "@test:consistency"
         ]
     }
 }
