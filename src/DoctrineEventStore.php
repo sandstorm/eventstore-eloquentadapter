@@ -9,6 +9,7 @@ use Doctrine\DBAL\Exception as DbalException;
 use Doctrine\DBAL\Exception\DeadlockException;
 use Doctrine\DBAL\Exception\LockWaitTimeoutException;
 use Doctrine\DBAL\Exception\UniqueConstraintViolationException;
+use Doctrine\DBAL\Platforms\SqlitePlatform;
 use Doctrine\DBAL\Result;
 use Doctrine\DBAL\Schema\AbstractSchemaManager;
 use Doctrine\DBAL\Schema\Column;
@@ -204,16 +205,16 @@ final class DoctrineEventStore implements EventStoreInterface
             (new Column('metadata', Type::getType(Types::TEXT))),
 
             // The unique event id, usually a UUID
-            (new Column('id', Type::getType(Types::BINARY)))
+            (new Column('id', Type::getType(Types::STRING)))
                 ->setLength(36),
 
             // An optional correlation id, usually a UUID
-            (new Column('correlationid', Type::getType(Types::BINARY)))
+            (new Column('correlationid', Type::getType(Types::STRING)))
                 ->setNotnull(false)
                 ->setLength(36),
 
             // An optional causation id, usually a UUID
-            (new Column('causationid', Type::getType(Types::BINARY)))
+            (new Column('causationid', Type::getType(Types::STRING)))
                 ->setNotnull(false)
                 ->setLength(36),
 
