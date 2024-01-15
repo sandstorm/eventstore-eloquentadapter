@@ -6,6 +6,8 @@ use DateTimeImmutable;
 use Doctrine\DBAL\Connection;
 use Doctrine\DBAL\Driver\Exception as DriverException;
 use Doctrine\DBAL\Exception as DbalException;
+use Doctrine\DBAL\Exception\DeadlockException;
+use Doctrine\DBAL\Exception\LockWaitTimeoutException;
 use Doctrine\DBAL\Exception\UniqueConstraintViolationException;
 use Doctrine\DBAL\Result;
 use Doctrine\DBAL\Schema\AbstractSchemaManager;
@@ -113,6 +115,9 @@ final class DoctrineEventStore implements EventStoreInterface
                 $retryWaitInterval *= 2;
                 $this->connection->rollBack();
                 continue;
+            } catch (DeadlockException | LockWaitTimeoutException $exception) {
+                $this->connection->rollBack();
+                throw new ConcurrencyException($exception->getMessage(), 1705330559, $exception);
             } catch (DbalException | ConcurrencyException | \JsonException $exception) {
                 $this->connection->rollBack();
                 throw $exception;

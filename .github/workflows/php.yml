@@ -24,7 +24,7 @@ jobs:
         env:
           MYSQL_ALLOW_EMPTY_PASSWORD: false
           MYSQL_ROOT_PASSWORD: password
-          MYSQL_DATABASE: dcb
+          MYSQL_DATABASE: eventstore
         ports:
           - 3306/tcp
         options: --health-cmd="mysqladmin ping" --health-interval=10s --health-timeout=5s --health-retries=3
@@ -33,7 +33,7 @@ jobs:
         env:
           POSTGRES_USER: root
           POSTGRES_PASSWORD: password
-          POSTGRES_DB: dcb
+          POSTGRES_DB: eventstore
         ports:
           - 5432/tcp
         options: --health-cmd pg_isready --health-interval 10s --health-timeout 5s --health-retries 3
@@ -63,12 +63,17 @@ jobs:
     - name: Install dependencies
       run: composer install --prefer-dist --no-progress
 
+    - name: Run tests (SQLIte)
+      run: composer run-script test
+      env:
+        DB_DSN: "sqlite:///events_test.sqlite"
+
     - name: Run tests (MySQL)
       run: composer run-script test
       env:
-        DB_DSN: "pdo-mysql://root:password@127.0.0.1:${{ job.services.mysql.ports['3306'] }}/dcb"
+        DB_DSN: "pdo-mysql://root:password@127.0.0.1:${{ job.services.mysql.ports['3306'] }}/eventstore"
 
     - name: Run tests (PostgreSQL)
       run: composer run-script test
       env:
-        DB_DSN: "pdo-pgsql://root:password@127.0.0.1:${{ job.services.postgres.ports['5432'] }}/dcb"
+        DB_DSN: "pdo-pgsql://root:password@127.0.0.1:${{ job.services.postgres.ports['5432'] }}/eventstore"
