@@ -6,6 +6,8 @@ use DateTimeImmutable;
 use Doctrine\DBAL\Connection;
 use Doctrine\DBAL\Driver\Exception as DriverException;
 use Doctrine\DBAL\Exception as DbalException;
+use Doctrine\DBAL\Exception\DeadlockException;
+use Doctrine\DBAL\Exception\LockWaitTimeoutException;
 use Doctrine\DBAL\Exception\UniqueConstraintViolationException;
 use Doctrine\DBAL\Result;
 use Doctrine\DBAL\Schema\Comparator;
@@ -21,7 +23,6 @@ use Neos\EventStore\Model\Event\StreamName;
 use Neos\EventStore\Model\Event\Version;
 use Neos\EventStore\Model\Events;
 use Neos\EventStore\Model\EventStore\CommitResult;
-use Neos\EventStore\Model\EventStore\SetupResult;
 use Neos\EventStore\Model\EventStore\Status;
 use Neos\EventStore\Model\EventStream\EventStreamFilter;
 use Neos\EventStore\Model\EventStream\EventStreamInterface;
@@ -29,11 +30,9 @@ use Neos\EventStore\Model\EventStream\ExpectedVersion;
 use Neos\EventStore\Model\EventStream\MaybeVersion;
 use Neos\EventStore\Model\EventStream\VirtualStreamName;
 use Neos\EventStore\Model\EventStream\VirtualStreamType;
-use Neos\EventStore\ProvidesSetupInterface;
-use Neos\EventStore\ProvidesStatusInterface;
 use Psr\Clock\ClockInterface;
 
-final class DoctrineEventStore implements EventStoreInterface, ProvidesSetupInterface, ProvidesStatusInterface
+final class DoctrineEventStore implements EventStoreInterface
 {
     private readonly ClockInterface $clock;
 
@@ -111,6 +110,9 @@ final class DoctrineEventStore implements EventStoreInterface, ProvidesSetupInte
                 $retryWaitInterval *= 2;
                 $this->connection->rollBack();
                 continue;
+            } catch (DeadlockException | LockWaitTimeoutException $exception) {
+                $this->connection->rollBack();
+                throw new ConcurrencyException($exception->getMessage(), 1705330559, $exception);
             } catch (DbalException | ConcurrencyException | \JsonException $exception) {
                 $this->connection->rollBack();
                 throw $exception;
@@ -127,27 +129,42 @@ final class DoctrineEventStore implements EventStoreInterface, ProvidesSetupInte
 
     public function status(): Status
     {
-        return Status::error('not implemented');
+        try {
+            $this->connection->connect();
+        } catch (DbalException $e) {
+            return Status::error(sprintf('Failed to connect to database: %s', $e->getMessage()));
+        }
+        $requiredSqlStatements = $this->determineRequiredSqlStatements();
+        if ($requiredSqlStatements !== []) {
+            return Status::setupRequired(sprintf('The following SQL statement%s required: %s', count($requiredSqlStatements) !== 1 ? 's are' : ' is', implode(chr(10), $requiredSqlStatements)));
+        }
+        return Status::ok();
     }
 
-    public function setup(): SetupResult
+    public function setup(): void
+    {
+        foreach ($this->determineRequiredSqlStatements() as $statement) {
+            $this->connection->executeStatement($statement);
+        }
+    }
+
+    /**
+     * @return array<string>
+     */
+    private function determineRequiredSqlStatements(): array
     {
         $schemaManager = $this->connection->getSchemaManager();
         assert($schemaManager !== null);
-        $fromSchema = $schemaManager->createSchema();
+        $platform = $this->connection->getDatabasePlatform();
+        assert($platform !== null);
+        if (!$schemaManager->tablesExist($this->eventTableName)) {
+            return $platform->getCreateTableSQL($this->createEventStoreSchema()->getTable($this->eventTableName));
+        }
+        $tableSchema = $schemaManager->listTableDetails($this->eventTableName);
+        $fromSchema = new Schema([$tableSchema], [], $schemaManager->createSchemaConfig());
         $schemaDiff = (new Comparator())->compare($fromSchema, $this->createEventStoreSchema());
-
-        $statements = $schemaDiff->toSaveSql($this->connection->getDatabasePlatform());
-        if ($statements === []) {
-            return SetupResult::success('Table schema is up to date, no migration required');
-        }
-
-        foreach ($statements as $statement) {
-            $this->connection->executeStatement($statement);
-        }
-        return SetupResult::success('Event store table created/updated successfully');
+        return $schemaDiff->toSaveSql($platform);
     }
-
 
     // ----------------------------------
 

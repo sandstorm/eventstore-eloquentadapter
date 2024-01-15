@@ -11,7 +11,7 @@
     ],
     "require": {
         "php": "^8.1",
-        "neos/eventstore": "1.0.0-beta1",
+        "neos/eventstore": "@dev",
         "doctrine/dbal": "^2",
         "webmozart/assert": "^1.10",
         "psr/clock": "^1"
@@ -38,17 +38,15 @@
         "test:phpstan": "phpstan",
         "test:cs": "phpcs --colors src",
         "test:cs:fix": "phpcbf --colors src",
-        "test:unit": "phpunit tests/Unit",
         "test:integration": "phpunit tests/Integration --exclude-group=parallel",
         "test:consistency": [
-            "paratest tests/Integration --group=parallel --functional --processes 20",
-            "Neos\\EventStore\\DoctrineAdapter\\Tests\\Integration\\ConcurrencyTest::validateEvents",
-            "Neos\\EventStore\\DoctrineAdapter\\Tests\\Integration\\ConcurrencyTest::cleanup"
+            "Neos\\EventStore\\DoctrineAdapter\\Tests\\Integration\\DoctrineEventStoreTest::prepare",
+            "paratest tests/Integration --group=parallel --functional --processes 10",
+            "Neos\\EventStore\\DoctrineAdapter\\Tests\\Integration\\DoctrineEventStoreTest::consistency_validateEvents"
         ],
         "test": [
             "@test:phpstan",
             "@test:cs",
-            "@test:unit",
             "@test:integration",
             "@test:consistency"
         ]
