@@ -187,9 +187,7 @@ final class DoctrineEventStore implements EventStoreInterface
 
             // The stream name, usually in the format "<BoundedContext>:<StreamName>"
             (new Column('stream', Type::getType(Types::STRING)))
-                ->setLength(StreamName::MAX_LENGTH)
-                ->setCustomSchemaOption('charset', 'ascii')
-                ->setCustomSchemaOption('collation', 'ascii_general_ci'),
+                ->setLength(StreamName::MAX_LENGTH),
 
             // Version of the event in the respective stream
             (new Column('version', Type::getType(Types::BIGINT)))
@@ -197,17 +195,13 @@ final class DoctrineEventStore implements EventStoreInterface
 
             // The event type, often in the format "<BoundedContext>:<EventType>"
             (new Column('type', Type::getType(Types::STRING)))
-                ->setLength(EventType::MAX_LENGTH)
-                ->setCustomSchemaOption('charset', 'ascii')
-                ->setCustomSchemaOption('collation', 'ascii_general_ci'),
+                ->setLength(EventType::MAX_LENGTH),
 
             // The event payload, usually stored as JSON
-            (new Column('payload', Type::getType(Types::TEXT)))
-                ->setCustomSchemaOption('collation', 'utf8mb4_unicode_520_ci'),
+            (new Column('payload', Type::getType(Types::TEXT))),
 
             // The event metadata stored as JSON
-            (new Column('metadata', Type::getType(Types::TEXT)))
-                ->setCustomSchemaOption('collation', 'utf8mb4_unicode_520_ci'),
+            (new Column('metadata', Type::getType(Types::TEXT))),
 
             // The unique event id, usually a UUID
             (new Column('id', Type::getType(Types::BINARY)))
