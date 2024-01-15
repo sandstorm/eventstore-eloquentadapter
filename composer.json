@@ -40,7 +40,7 @@
         "test:cs:fix": "phpcbf --colors src",
         "test:integration": "phpunit tests/Integration --exclude-group=parallel",
         "test:consistency": [
-            "Neos\\EventStore\\DoctrineAdapter\\Tests\\Integration\\DoctrineEventStoreTest::prepare",
+            "Neos\\EventStore\\DoctrineAdapter\\Tests\\Integration\\DoctrineEventStoreTest::consistency_prepare",
             "paratest tests/Integration --group=parallel --functional --processes 10",
             "Neos\\EventStore\\DoctrineAdapter\\Tests\\Integration\\DoctrineEventStoreTest::consistency_validateEvents"
         ],
