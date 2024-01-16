@@ -15,7 +15,6 @@ use Doctrine\DBAL\Schema\AbstractSchemaManager;
 use Doctrine\DBAL\Schema\Column;
 use Doctrine\DBAL\Schema\Comparator;
 use Doctrine\DBAL\Schema\Schema;
-use Doctrine\DBAL\Schema\SchemaConfig;
 use Doctrine\DBAL\Schema\Table;
 use Doctrine\DBAL\Types\Type;
 use Doctrine\DBAL\Types\Types;
@@ -23,6 +22,9 @@ use Neos\EventStore\EventStoreInterface;
 use Neos\EventStore\Exception\ConcurrencyException;
 use Neos\EventStore\Helper\BatchEventStream;
 use Neos\EventStore\Model\Event;
+use Neos\EventStore\Model\Event\CausationId;
+use Neos\EventStore\Model\Event\CorrelationId;
+use Neos\EventStore\Model\Event\EventId;
 use Neos\EventStore\Model\Event\EventType;
 use Neos\EventStore\Model\Event\SequenceNumber;
 use Neos\EventStore\Model\Event\StreamName;
@@ -184,45 +186,54 @@ final class DoctrineEventStore implements EventStoreInterface
      */
     private function createEventStoreSchema(AbstractSchemaManager $schemaManager): Schema
     {
+        $isSQLite = $schemaManager->getDatabasePlatform() instanceof SqlitePlatform;
         $table = new Table($this->eventTableName, [
             // The monotonic sequence number
-            (new Column('sequencenumber', Type::getType(Types::INTEGER)))
+            (new Column('sequencenumber', Type::getType($isSQLite ? Types::INTEGER : Types::BIGINT)))
+                ->setUnsigned(true)
                 ->setAutoincrement(true),
 
             // The stream name, usually in the format "<BoundedContext>:<StreamName>"
             (new Column('stream', Type::getType(Types::STRING)))
-                ->setLength(StreamName::MAX_LENGTH),
+                ->setLength(StreamName::MAX_LENGTH)
+                ->setCustomSchemaOptions($isSQLite ? [] : ['charset' => 'ascii']),
 
             // Version of the event in the respective stream
-            (new Column('version', Type::getType(Types::BIGINT)))
+            (new Column('version', Type::getType($isSQLite ? Types::INTEGER : Types::BIGINT)))
                 ->setUnsigned(true),
 
             // The event type, often in the format "<BoundedContext>:<EventType>"
             (new Column('type', Type::getType(Types::STRING)))
-                ->setLength(EventType::MAX_LENGTH),
+                ->setLength(EventType::MAX_LENGTH)
+                ->setCustomSchemaOptions($isSQLite ? [] : ['charset' => 'ascii']),
 
             // The event payload, usually stored as JSON
             (new Column('payload', Type::getType(Types::TEXT))),
 
             // The event metadata stored as JSON
-            (new Column('metadata', Type::getType(Types::TEXT))),
+            (new Column('metadata', Type::getType(Types::JSON)))
+                ->setNotnull(false),
 
-            // The unique event id, usually a UUID
+            // The unique event id, stored as UUID
             (new Column('id', Type::getType(Types::STRING)))
-                ->setLength(36),
-
-            // An optional correlation id, usually a UUID
-            (new Column('correlationid', Type::getType(Types::STRING)))
-                ->setNotnull(false)
-                ->setLength(36),
+                ->setFixed(true)
+                ->setLength(EventId::MAX_LENGTH)
+                ->setCustomSchemaOptions($isSQLite ? [] : ['charset' => 'ascii']),
 
             // An optional causation id, usually a UUID
             (new Column('causationid', Type::getType(Types::STRING)))
                 ->setNotnull(false)
-                ->setLength(36),
+                ->setLength(CausationId::MAX_LENGTH)
+                ->setCustomSchemaOptions($isSQLite ? [] : ['charset' => 'ascii']),
+
+            // An optional correlation id, usually a UUID
+            (new Column('correlationid', Type::getType(Types::STRING)))
+                ->setNotnull(false)
+                ->setLength(CorrelationId::MAX_LENGTH)
+                ->setCustomSchemaOptions($isSQLite ? [] : ['charset' => 'ascii']),
 
             // Timestamp of the event publishing
-            (new Column('recordedat', Type::getType(Types::DATETIME_IMMUTABLE)))
+            (new Column('recordedat', Type::getType(Types::DATETIME_IMMUTABLE))),
         ]);
 
         $table->setPrimaryKey(['sequencenumber']);
@@ -273,7 +284,7 @@ final class DoctrineEventStore implements EventStoreInterface
                 'recordedat' => $this->clock->now(),
             ],
             [
-                'version' => Types::INTEGER,
+                'version' => Types::BIGINT,
                 'recordedat' => Types::DATETIME_IMMUTABLE,
             ]
         );
