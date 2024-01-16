@@ -77,8 +77,11 @@ final class DoctrineEventStore implements EventStoreInterface
         return BatchEventStream::create(DoctrineEventStream::create($queryBuilder), 100);
     }
 
-    public function commit(StreamName $streamName, Events $events, ExpectedVersion $expectedVersion): CommitResult
+    public function commit(StreamName $streamName, Event|Events $events, ExpectedVersion $expectedVersion): CommitResult
     {
+        if ($events instanceof Event) {
+            $events = Events::fromArray([$events]);
+        }
         # Exponential backoff: initial interval = 5ms and 8 retry attempts = max 1275ms (= 1,275 seconds)
         # @see http://backoffcalculator.com/?attempts=8&rate=2&interval=5
         $retryWaitInterval = 0.005;
@@ -223,8 +226,8 @@ final class DoctrineEventStore implements EventStoreInterface
         ]);
 
         $table->setPrimaryKey(['sequencenumber']);
-        $table->addUniqueIndex(['id'], 'id_uniq');
-        $table->addUniqueIndex(['stream', 'version'], 'stream_version_uniq');
+        $table->addUniqueIndex(['id']);
+        $table->addUniqueIndex(['stream', 'version']);
         $table->addIndex(['correlationid']);
 
         $schemaConfiguration = $schemaManager->createSchemaConfig();
@@ -264,9 +267,9 @@ final class DoctrineEventStore implements EventStoreInterface
                 'version' => $version->value,
                 'type' => $event->type->value,
                 'payload' => $event->data->value,
-                'metadata' => $event->metadata->toJson(),
-                'correlationid' => $event->metadata->get('correlationId'),
-                'causationid' => $event->metadata->get('causationId'),
+                'metadata' => $event->metadata?->toJson(),
+                'causationid' => $event->causationId?->value,
+                'correlationid' => $event->correlationId?->value,
                 'recordedat' => $this->clock->now(),
             ],
             [

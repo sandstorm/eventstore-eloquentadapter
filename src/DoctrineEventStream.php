@@ -95,7 +95,7 @@ final class DoctrineEventStream implements EventStreamInterface
                     EventId::fromString($row['id']),
                     EventType::fromString($row['type']),
                     EventData::fromString($row['payload']),
-                    EventMetadata::fromJson($row['metadata']),
+                    isset($row['metadata']) ? EventMetadata::fromJson($row['metadata']) : null,
                 ),
                 StreamName::fromString($row['stream']),
                 Version::fromInteger((int)$row['version']),
