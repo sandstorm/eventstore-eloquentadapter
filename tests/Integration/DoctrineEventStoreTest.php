@@ -26,6 +26,9 @@ final class DoctrineEventStoreTest extends AbstractEventStoreTestBase
     protected static function resetEventStore(): void
     {
         $connection = self::connection();
+        if (!$connection->getSchemaManager()->tablesExist([self::eventTableName()])) {
+            return;
+        }
         if ($connection->getDatabasePlatform() instanceof SqlitePlatform) {
             $connection->executeStatement('DELETE FROM ' . self::eventTableName());
             $connection->executeStatement('UPDATE SQLITE_SEQUENCE SET SEQ=0 WHERE NAME="' . self::eventTableName() . '"');
