@@ -9,15 +9,23 @@ use Doctrine\DBAL\Exception as DbalException;
 use Doctrine\DBAL\Exception\DeadlockException;
 use Doctrine\DBAL\Exception\LockWaitTimeoutException;
 use Doctrine\DBAL\Exception\UniqueConstraintViolationException;
+use Doctrine\DBAL\Platforms\SqlitePlatform;
 use Doctrine\DBAL\Result;
+use Doctrine\DBAL\Schema\AbstractSchemaManager;
+use Doctrine\DBAL\Schema\Column;
 use Doctrine\DBAL\Schema\Comparator;
 use Doctrine\DBAL\Schema\Schema;
-use Doctrine\DBAL\Schema\SchemaConfig;
+use Doctrine\DBAL\Schema\Table;
+use Doctrine\DBAL\Types\Type;
 use Doctrine\DBAL\Types\Types;
 use Neos\EventStore\EventStoreInterface;
 use Neos\EventStore\Exception\ConcurrencyException;
 use Neos\EventStore\Helper\BatchEventStream;
 use Neos\EventStore\Model\Event;
+use Neos\EventStore\Model\Event\CausationId;
+use Neos\EventStore\Model\Event\CorrelationId;
+use Neos\EventStore\Model\Event\EventId;
+use Neos\EventStore\Model\Event\EventType;
 use Neos\EventStore\Model\Event\SequenceNumber;
 use Neos\EventStore\Model\Event\StreamName;
 use Neos\EventStore\Model\Event\Version;
@@ -161,11 +169,11 @@ final class DoctrineEventStore implements EventStoreInterface
         $platform = $this->connection->getDatabasePlatform();
         assert($platform !== null);
         if (!$schemaManager->tablesExist($this->eventTableName)) {
-            return $platform->getCreateTableSQL($this->createEventStoreSchema()->getTable($this->eventTableName));
+            return $platform->getCreateTableSQL($this->createEventStoreSchema($schemaManager)->getTable($this->eventTableName));
         }
         $tableSchema = $schemaManager->listTableDetails($this->eventTableName);
         $fromSchema = new Schema([$tableSchema], [], $schemaManager->createSchemaConfig());
-        $schemaDiff = (new Comparator())->compare($fromSchema, $this->createEventStoreSchema());
+        $schemaDiff = (new Comparator())->compare($fromSchema, $this->createEventStoreSchema($schemaManager));
         return $schemaDiff->toSaveSql($platform);
     }
 
@@ -176,44 +184,66 @@ final class DoctrineEventStore implements EventStoreInterface
      *
      * @return Schema
      */
-    private function createEventStoreSchema(): Schema
+    private function createEventStoreSchema(AbstractSchemaManager $schemaManager): Schema
     {
-        $schemaConfiguration = new SchemaConfig();
-        $connectionParameters = $this->connection->getParams();
-        if (isset($connectionParameters['defaultTableOptions'])) {
-            assert(is_array($connectionParameters['defaultTableOptions']));
-            $schemaConfiguration->setDefaultTableOptions($connectionParameters['defaultTableOptions']);
-        }
-        $schema = new Schema([], [], $schemaConfiguration);
-        $table = $schema->createTable($this->eventTableName);
+        $isSQLite = $schemaManager->getDatabasePlatform() instanceof SqlitePlatform;
+        $table = new Table($this->eventTableName, [
+            // The monotonic sequence number
+            (new Column('sequencenumber', Type::getType($isSQLite ? Types::INTEGER : Types::BIGINT)))
+                ->setUnsigned(true)
+                ->setAutoincrement(true),
 
-        // The monotonic sequence number
-        $table->addColumn('sequencenumber', Types::INTEGER, ['autoincrement' => true]);
-        // The stream name, usually in the format "<BoundedContext>:<StreamName>"
-        $table->addColumn('stream', Types::STRING, ['length' => 255]);
-        // Version of the event in the respective stream
-        $table->addColumn('version', Types::BIGINT, ['unsigned' => true]);
-        // The event type in the format "<BoundedContext>:<EventType>"
-        $table->addColumn('type', Types::STRING, ['length' => 255]);
-        // The event payload as JSON
-        $table->addColumn('payload', Types::TEXT);
-        // The event metadata as JSON
-        $table->addColumn('metadata', Types::TEXT, ['notnull' => false]);
-        // The unique event id, usually a UUID
-        $table->addColumn('id', Types::STRING, ['length' => 255]);
-        // An optional correlation id, usually a UUID
-        $table->addColumn('correlationid', Types::STRING, ['length' => 255, 'notnull' => false]);
-        // An optional causation id, usually a UUID
-        $table->addColumn('causationid', Types::STRING, ['length' => 255, 'notnull' => false]);
-        // Timestamp of the the event publishing
-        $table->addColumn('recordedat', Types::DATETIME_IMMUTABLE);
+            // The stream name, usually in the format "<BoundedContext>:<StreamName>"
+            (new Column('stream', Type::getType(Types::STRING)))
+                ->setLength(StreamName::MAX_LENGTH)
+                ->setCustomSchemaOptions($isSQLite ? [] : ['charset' => 'ascii']),
+
+            // Version of the event in the respective stream
+            (new Column('version', Type::getType($isSQLite ? Types::INTEGER : Types::BIGINT)))
+                ->setUnsigned(true),
+
+            // The event type, often in the format "<BoundedContext>:<EventType>"
+            (new Column('type', Type::getType(Types::STRING)))
+                ->setLength(EventType::MAX_LENGTH)
+                ->setCustomSchemaOptions($isSQLite ? [] : ['charset' => 'ascii']),
+
+            // The event payload, usually stored as JSON
+            (new Column('payload', Type::getType(Types::TEXT))),
+
+            // The event metadata stored as JSON
+            (new Column('metadata', Type::getType(Types::JSON)))
+                ->setNotnull(false),
+
+            // The unique event id, stored as UUID
+            (new Column('id', Type::getType(Types::STRING)))
+                ->setFixed(true)
+                ->setLength(EventId::MAX_LENGTH)
+                ->setCustomSchemaOptions($isSQLite ? [] : ['charset' => 'ascii']),
+
+            // An optional causation id, usually a UUID
+            (new Column('causationid', Type::getType(Types::STRING)))
+                ->setNotnull(false)
+                ->setLength(CausationId::MAX_LENGTH)
+                ->setCustomSchemaOptions($isSQLite ? [] : ['charset' => 'ascii']),
+
+            // An optional correlation id, usually a UUID
+            (new Column('correlationid', Type::getType(Types::STRING)))
+                ->setNotnull(false)
+                ->setLength(CorrelationId::MAX_LENGTH)
+                ->setCustomSchemaOptions($isSQLite ? [] : ['charset' => 'ascii']),
+
+            // Timestamp of the event publishing
+            (new Column('recordedat', Type::getType(Types::DATETIME_IMMUTABLE))),
+        ]);
 
         $table->setPrimaryKey(['sequencenumber']);
         $table->addUniqueIndex(['id']);
         $table->addUniqueIndex(['stream', 'version']);
         $table->addIndex(['correlationid']);
 
-        return $schema;
+        $schemaConfiguration = $schemaManager->createSchemaConfig();
+        $schemaConfiguration->setDefaultTableOptions(['charset' => 'utf8mb4']);
+        return new Schema([$table], [], $schemaConfiguration);
     }
 
     /**
@@ -254,7 +284,7 @@ final class DoctrineEventStore implements EventStoreInterface
                 'recordedat' => $this->clock->now(),
             ],
             [
-                'version' => Types::INTEGER,
+                'version' => Types::BIGINT,
                 'recordedat' => Types::DATETIME_IMMUTABLE,
             ]
         );
