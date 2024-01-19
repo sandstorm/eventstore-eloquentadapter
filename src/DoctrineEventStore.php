@@ -9,6 +9,7 @@ use Doctrine\DBAL\Exception as DbalException;
 use Doctrine\DBAL\Exception\DeadlockException;
 use Doctrine\DBAL\Exception\LockWaitTimeoutException;
 use Doctrine\DBAL\Exception\UniqueConstraintViolationException;
+use Doctrine\DBAL\Platforms\AbstractPlatform;
 use Doctrine\DBAL\Platforms\SqlitePlatform;
 use Doctrine\DBAL\Result;
 use Doctrine\DBAL\Schema\AbstractSchemaManager;
@@ -164,17 +165,17 @@ final class DoctrineEventStore implements EventStoreInterface
      */
     private function determineRequiredSqlStatements(): array
     {
-        $schemaManager = $this->connection->getSchemaManager();
+        $schemaManager = $this->connection->createSchemaManager();
         assert($schemaManager !== null);
         $platform = $this->connection->getDatabasePlatform();
         assert($platform !== null);
         if (!$schemaManager->tablesExist($this->eventTableName)) {
             return $platform->getCreateTableSQL($this->createEventStoreSchema($schemaManager)->getTable($this->eventTableName));
         }
-        $tableSchema = $schemaManager->listTableDetails($this->eventTableName);
+        $tableSchema = $schemaManager->introspectTable($this->eventTableName);
         $fromSchema = new Schema([$tableSchema], [], $schemaManager->createSchemaConfig());
-        $schemaDiff = (new Comparator())->compare($fromSchema, $this->createEventStoreSchema($schemaManager));
-        return $schemaDiff->toSaveSql($platform);
+        $schemaDiff = (new Comparator())->compareSchemas($fromSchema, $this->createEventStoreSchema($schemaManager));
+        return $platform->getAlterSchemaSQL($schemaDiff);
     }
 
     // ----------------------------------
@@ -182,11 +183,12 @@ final class DoctrineEventStore implements EventStoreInterface
     /**
      * Creates the Doctrine schema to be compared with the current db schema for migration
      *
+     * @param AbstractSchemaManager<AbstractPlatform> $schemaManager
      * @return Schema
      */
     private function createEventStoreSchema(AbstractSchemaManager $schemaManager): Schema
     {
-        $isSQLite = $schemaManager->getDatabasePlatform() instanceof SqlitePlatform;
+        $isSQLite = $this->connection->getDatabasePlatform() instanceof SqlitePlatform;
         $table = new Table($this->eventTableName, [
             // The monotonic sequence number
             (new Column('sequencenumber', Type::getType($isSQLite ? Types::INTEGER : Types::BIGINT)))
@@ -196,7 +198,7 @@ final class DoctrineEventStore implements EventStoreInterface
             // The stream name, usually in the format "<BoundedContext>:<StreamName>"
             (new Column('stream', Type::getType(Types::STRING)))
                 ->setLength(StreamName::MAX_LENGTH)
-                ->setCustomSchemaOptions($isSQLite ? [] : ['charset' => 'ascii']),
+                ->setPlatformOptions($isSQLite ? [] : ['charset' => 'ascii']),
 
             // Version of the event in the respective stream
             (new Column('version', Type::getType($isSQLite ? Types::INTEGER : Types::BIGINT)))
@@ -205,7 +207,7 @@ final class DoctrineEventStore implements EventStoreInterface
             // The event type, often in the format "<BoundedContext>:<EventType>"
             (new Column('type', Type::getType(Types::STRING)))
                 ->setLength(EventType::MAX_LENGTH)
-                ->setCustomSchemaOptions($isSQLite ? [] : ['charset' => 'ascii']),
+                ->setPlatformOptions($isSQLite ? [] : ['charset' => 'ascii']),
 
             // The event payload, usually stored as JSON
             (new Column('payload', Type::getType(Types::TEXT))),
@@ -218,19 +220,19 @@ final class DoctrineEventStore implements EventStoreInterface
             (new Column('id', Type::getType(Types::STRING)))
                 ->setFixed(true)
                 ->setLength(EventId::MAX_LENGTH)
-                ->setCustomSchemaOptions($isSQLite ? [] : ['charset' => 'ascii']),
+                ->setPlatformOptions($isSQLite ? [] : ['charset' => 'ascii']),
 
             // An optional causation id, usually a UUID
             (new Column('causationid', Type::getType(Types::STRING)))
                 ->setNotnull(false)
                 ->setLength(CausationId::MAX_LENGTH)
-                ->setCustomSchemaOptions($isSQLite ? [] : ['charset' => 'ascii']),
+                ->setPlatformOptions($isSQLite ? [] : ['charset' => 'ascii']),
 
             // An optional correlation id, usually a UUID
             (new Column('correlationid', Type::getType(Types::STRING)))
                 ->setNotnull(false)
                 ->setLength(CorrelationId::MAX_LENGTH)
-                ->setCustomSchemaOptions($isSQLite ? [] : ['charset' => 'ascii']),
+                ->setPlatformOptions($isSQLite ? [] : ['charset' => 'ascii']),
 
             // Timestamp of the event publishing
             (new Column('recordedat', Type::getType(Types::DATETIME_IMMUTABLE))),
