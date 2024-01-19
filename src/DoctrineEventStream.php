@@ -82,8 +82,7 @@ final class DoctrineEventStream implements EventStreamInterface
 
         $this->reconnectDatabaseConnection();
 
-        /** @var Result<array<string, string>> $result */
-        $result = $queryBuilder->execute();
+        $result = $queryBuilder->executeQuery();
         /** @var array<string, string> $row */
         foreach ($result->fetchAllAssociative() as $row) {
             $recordedAt = \DateTimeImmutable::createFromFormat('Y-m-d H:i:s', $row['recordedat']);
