@@ -169,7 +169,7 @@ final class DoctrineEventStore implements EventStoreInterface
         assert($schemaManager !== null);
         $platform = $this->connection->getDatabasePlatform();
         assert($platform !== null);
-        if (!$schemaManager->tablesExist($this->eventTableName)) {
+        if (!$schemaManager->tablesExist([$this->eventTableName])) {
             return $platform->getCreateTableSQL($this->createEventStoreSchema($schemaManager)->getTable($this->eventTableName));
         }
         $tableSchema = $schemaManager->introspectTable($this->eventTableName);
@@ -259,7 +259,7 @@ final class DoctrineEventStore implements EventStoreInterface
             ->from($this->eventTableName)
             ->where('stream = :streamName')
             ->setParameter('streamName', $streamName->value)
-            ->execute();
+            ->executeQuery();
         if (!$result instanceof Result) {
             throw new \RuntimeException(sprintf('Failed to determine stream version of stream "%s"', $streamName->value), 1651153859);
         }
