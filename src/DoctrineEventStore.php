@@ -48,7 +48,7 @@ final class DoctrineEventStore implements EventStoreInterface
     public function __construct(
         private readonly Connection $connection,
         private readonly string $eventTableName,
-        ClockInterface $clock = null
+        ?ClockInterface $clock = null
     ) {
         $this->clock = $clock ?? new class implements ClockInterface {
             public function now(): DateTimeImmutable
@@ -58,7 +58,7 @@ final class DoctrineEventStore implements EventStoreInterface
         };
     }
 
-    public function load(VirtualStreamName|StreamName $streamName, EventStreamFilter $filter = null): EventStreamInterface
+    public function load(VirtualStreamName|StreamName $streamName, ?EventStreamFilter $filter = null): EventStreamInterface
     {
         $this->reconnectDatabaseConnection();
         $queryBuilder = $this->connection->createQueryBuilder()
