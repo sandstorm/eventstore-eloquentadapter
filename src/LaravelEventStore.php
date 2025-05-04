@@ -1,32 +1,16 @@
 <?php
 declare(strict_types=1);
-namespace Sandstorm\EventStore\LaravelAdapter;
+
+namespace Neos\EventStore\DoctrineAdapter;
 
 use DateTimeImmutable;
-use Doctrine\DBAL\Connection;
-use Doctrine\DBAL\Driver\Exception as DriverException;
-use Doctrine\DBAL\Exception as DbalException;
-use Doctrine\DBAL\Exception\DeadlockException;
-use Doctrine\DBAL\Exception\LockWaitTimeoutException;
-use Doctrine\DBAL\Exception\UniqueConstraintViolationException;
-use Doctrine\DBAL\Platforms\AbstractPlatform;
-use Doctrine\DBAL\Platforms\SqlitePlatform;
-use Doctrine\DBAL\Result;
-use Doctrine\DBAL\Schema\AbstractSchemaManager;
-use Doctrine\DBAL\Schema\Column;
-use Doctrine\DBAL\Schema\Comparator;
-use Doctrine\DBAL\Schema\Schema;
-use Doctrine\DBAL\Schema\Table;
-use Doctrine\DBAL\Types\Type;
-use Doctrine\DBAL\Types\Types;
+use Illuminate\Database\Connection as DbConnection;
+use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Database\Schema\Builder as SchemaBuilder;
 use Neos\EventStore\EventStoreInterface;
 use Neos\EventStore\Exception\ConcurrencyException;
 use Neos\EventStore\Helper\BatchEventStream;
 use Neos\EventStore\Model\Event;
-use Neos\EventStore\Model\Event\CausationId;
-use Neos\EventStore\Model\Event\CorrelationId;
-use Neos\EventStore\Model\Event\EventId;
-use Neos\EventStore\Model\Event\EventType;
 use Neos\EventStore\Model\Event\SequenceNumber;
 use Neos\EventStore\Model\Event\StreamName;
 use Neos\EventStore\Model\Event\Version;
@@ -40,16 +24,20 @@ use Neos\EventStore\Model\EventStream\MaybeVersion;
 use Neos\EventStore\Model\EventStream\VirtualStreamName;
 use Neos\EventStore\Model\EventStream\VirtualStreamType;
 use Psr\Clock\ClockInterface;
+use RuntimeException;
+use Illuminate\Database\QueryException;
+use Sandstorm\EventStore\EloquentAdapter\LaravelEventStream as EloquentStream;
 
 final class LaravelEventStore implements EventStoreInterface
 {
     private readonly ClockInterface $clock;
 
     public function __construct(
-        private readonly Connection $connection,
-        private readonly string $eventTableName,
-        ?ClockInterface $clock = null
-    ) {
+        private readonly DbConnection $connection,
+        private readonly string       $eventTableName,
+        ?ClockInterface               $clock = null
+    )
+    {
         $this->clock = $clock ?? new class implements ClockInterface {
             public function now(): DateTimeImmutable
             {
@@ -61,23 +49,29 @@ final class LaravelEventStore implements EventStoreInterface
     public function load(VirtualStreamName|StreamName $streamName, ?EventStreamFilter $filter = null): EventStreamInterface
     {
         $this->reconnectDatabaseConnection();
-        $queryBuilder = $this->connection->createQueryBuilder()
-            ->select('*')
-            ->from($this->eventTableName)
-            ->orderBy('sequencenumber', 'ASC');
 
-        $queryBuilder = match ($streamName::class) {
-            StreamName::class => $queryBuilder->andWhere('stream = :streamName')->setParameter('streamName', $streamName->value),
+        /** @var \Illuminate\Database\Query\Builder $query */
+        $query = $this->connection
+            ->table($this->eventTableName)
+            ->orderBy('sequencenumber', 'asc');
+
+        $query = match ($streamName::class) {
+            StreamName::class => $query->where('stream', $streamName->value),
             VirtualStreamName::class => match ($streamName->type) {
-                VirtualStreamType::ALL => $queryBuilder,
-                VirtualStreamType::CATEGORY => $queryBuilder->andWhere('stream LIKE :streamNamePrefix')->setParameter('streamNamePrefix', $streamName->value . '%'),
-                VirtualStreamType::CORRELATION_ID => $queryBuilder->andWhere('correlationId LIKE :correlationId')->setParameter('correlationId', $streamName->value),
+                VirtualStreamType::ALL => $query,
+                VirtualStreamType::CATEGORY => $query->where('stream', 'like', $streamName->value . '%'),
+                VirtualStreamType::CORRELATION_ID => $query->where('correlationid', $streamName->value),
             },
         };
+
         if ($filter !== null && $filter->eventTypes !== null) {
-            $queryBuilder->andWhere('type IN (:eventTypes)')->setParameter('eventTypes', $filter->eventTypes->toStringArray(), Connection::PARAM_STR_ARRAY);
+            $query->whereIn('type', $filter->eventTypes->toStringArray());
         }
-        return BatchEventStream::create(DoctrineEventStream::create($queryBuilder), 100);
+
+        return BatchEventStream::create(
+            EloquentStream::create($query),
+            100
+        );
     }
 
     public function commit(StreamName $streamName, Event|Events $events, ExpectedVersion $expectedVersion): CommitResult
@@ -85,196 +79,162 @@ final class LaravelEventStore implements EventStoreInterface
         if ($events instanceof Event) {
             $events = Events::fromArray([$events]);
         }
+
         # Exponential backoff: initial interval = 5ms and 8 retry attempts = max 1275ms (= 1,275 seconds)
         # @see http://backoffcalculator.com/?attempts=8&rate=2&interval=5
+
         $retryWaitInterval = 0.005;
         $maxRetryAttempts = 8;
         $retryAttempt = 0;
+
         while (true) {
             $this->reconnectDatabaseConnection();
-            if ($this->connection->getTransactionNestingLevel() > 0) {
-                throw new \RuntimeException('A transaction is active already, can\'t commit events!', 1547829131);
+
+            if ($this->connection->transactionLevel() > 0) {
+                throw new RuntimeException(
+                    'A transaction is active already, can\'t commit events!',
+                    1547829131
+                );
             }
+
             $this->connection->beginTransaction();
             try {
                 $maybeVersion = $this->getStreamVersion($streamName);
                 $expectedVersion->verifyVersion($maybeVersion);
-                $version = $maybeVersion->isNothing() ? Version::first() : $maybeVersion->unwrap()->next();
+
+                $version = $maybeVersion->isNothing()
+                    ? Version::first()
+                    : $maybeVersion->unwrap()->next();
+
                 $lastCommittedVersion = $version;
                 foreach ($events as $event) {
                     $this->commitEvent($streamName, $event, $version);
                     $lastCommittedVersion = $version;
                     $version = $version->next();
                 }
-                $lastInsertId = $this->connection->lastInsertId();
+                $lastInsertId = $this->connection->getPdo()->lastInsertId();
                 if (!is_numeric($lastInsertId)) {
-                    throw new \RuntimeException(sprintf('Expected last insert id to be numeric, but it is: %s', get_debug_type($lastInsertId)), 1651749706);
+                    throw new RuntimeException(
+                        sprintf(
+                            'Expected last insert id to be numeric, but it is: %s',
+                            get_debug_type($lastInsertId)
+                        ),
+                        1651749706
+                    );
                 }
+
                 $this->connection->commit();
-                return new CommitResult($lastCommittedVersion, SequenceNumber::fromInteger((int)$lastInsertId));
-            } catch (UniqueConstraintViolationException $exception) {
-                if ($retryAttempt >= $maxRetryAttempts) {
-                    $this->connection->rollBack();
-                    throw new ConcurrencyException(sprintf('Failed after %d retry attempts', $retryAttempt), 1573817175, $exception);
+                return new CommitResult(
+                    $lastCommittedVersion,
+                    SequenceNumber::fromInteger((int)$lastInsertId)
+                );
+            } catch (QueryException $e) {
+                $this->connection->rollBack();
+
+                // pull out SQLSTATE and driver error code
+                $errorInfo = $e->errorInfo;
+                $sqlState = $errorInfo[0] ?? null;
+                $driverCode = $errorInfo[1] ?? null;
+
+                // true for unique‐constraint (optimistic concurrency) or deadlock/lock‐timeout
+                $isConcurrency = in_array($sqlState, ['23000', '40001', '40P01'], true)
+                    || in_array($driverCode, [1213, 1205], true);
+
+                if (!$isConcurrency) {
+                    // not a concurrency error → rethrow immediately
+                    throw $e;
                 }
-                usleep((int)($retryWaitInterval * 1E6));
+
+                // only here do we apply retries
+                if ($retryAttempt >= $maxRetryAttempts) {
+                    throw new ConcurrencyException(
+                        sprintf('Failed after %d retry attempts', $retryAttempt),
+                        (int)$e->getCode(),
+                        $e
+                    );
+                }
+                usleep((int)($retryWaitInterval * 1e6));
                 $retryAttempt++;
                 $retryWaitInterval *= 2;
-                $this->connection->rollBack();
                 continue;
-            } catch (DeadlockException | LockWaitTimeoutException $exception) {
+            } catch (ConcurrencyException|\JsonException $e) {
                 $this->connection->rollBack();
-                throw new ConcurrencyException($exception->getMessage(), 1705330559, $exception);
-            } catch (DbalException | ConcurrencyException | \JsonException $exception) {
-                $this->connection->rollBack();
-                throw $exception;
+                throw $e;
             }
         }
     }
 
     public function deleteStream(StreamName $streamName): void
     {
-        $this->connection->delete($this->eventTableName, [
-            'stream' => $streamName->value
-        ]);
+        $this->connection
+            ->table($this->eventTableName)
+            ->where('stream', $streamName->value)
+            ->delete();
     }
 
     public function status(): Status
     {
         try {
-            $this->connection->connect();
-        } catch (DbalException $e) {
+            $this->connection->getPdo();
+        } catch (\Exception $e) {
             return Status::error(sprintf('Failed to connect to database: %s', $e->getMessage()));
         }
-        $requiredSqlStatements = $this->determineRequiredSqlStatements();
-        if ($requiredSqlStatements !== []) {
-            return Status::setupRequired(sprintf('The following SQL statement%s required: %s', count($requiredSqlStatements) !== 1 ? 's are' : ' is', implode(chr(10), $requiredSqlStatements)));
+
+        /** @var SchemaBuilder $schema */
+        $schema = $this->connection->getSchemaBuilder();
+        if (!$schema->hasTable($this->eventTableName)) {
+            return Status::setupRequired(
+                sprintf('Table `%s` does not exist.', $this->eventTableName)
+            );
         }
+
         return Status::ok();
     }
 
     public function setup(): void
     {
-        foreach ($this->determineRequiredSqlStatements() as $statement) {
-            $this->connection->executeStatement($statement);
+        /** @var SchemaBuilder $schema */
+        $schema = $this->connection->getSchemaBuilder();
+        if (!$schema->hasTable($this->eventTableName)) {
+            $schema->create($this->eventTableName, function (Blueprint $table) {
+                $table->unsignedBigInteger('sequencenumber', true);
+                $table->string('stream', StreamName::MAX_LENGTH)->charset('ascii');
+                $table->unsignedBigInteger('version');
+                $table->string('type', EventType::MAX_LENGTH)->charset('ascii');
+                $table->text('payload');
+                $table->json('metadata')->nullable();
+                $table->char('id', EventId::MAX_LENGTH);
+                $table->char('causationid', CausationId::MAX_LENGTH)->nullable();
+                $table->char('correlationid', CorrelationId::MAX_LENGTH)->nullable();
+                $table->timestamp('recordedat');
+
+                $table->primary('sequencenumber');
+                $table->unique('id');
+                $table->unique(['stream', 'version']);
+                $table->index('correlationid');
+            });
         }
     }
 
-    /**
-     * @return array<string>
-     */
-    private function determineRequiredSqlStatements(): array
-    {
-        $schemaManager = $this->connection->createSchemaManager();
-        assert($schemaManager !== null);
-        $platform = $this->connection->getDatabasePlatform();
-        assert($platform !== null);
-        if (!$schemaManager->tablesExist([$this->eventTableName])) {
-            return $platform->getCreateTableSQL($this->createEventStoreSchema($schemaManager)->getTable($this->eventTableName));
-        }
-        $tableSchema = $schemaManager->introspectTable($this->eventTableName);
-        $fromSchema = new Schema([$tableSchema], [], $schemaManager->createSchemaConfig());
-        $schemaDiff = (new Comparator())->compareSchemas($fromSchema, $this->createEventStoreSchema($schemaManager));
-        return $platform->getAlterSchemaSQL($schemaDiff);
-    }
-
-    // ----------------------------------
-
-    /**
-     * Creates the Doctrine schema to be compared with the current db schema for migration
-     *
-     * @param AbstractSchemaManager<AbstractPlatform> $schemaManager
-     * @return Schema
-     */
-    private function createEventStoreSchema(AbstractSchemaManager $schemaManager): Schema
-    {
-        $isSQLite = $this->connection->getDatabasePlatform() instanceof SqlitePlatform;
-        $table = new Table($this->eventTableName, [
-            // The monotonic sequence number
-            (new Column('sequencenumber', Type::getType($isSQLite ? Types::INTEGER : Types::BIGINT)))
-                ->setUnsigned(true)
-                ->setAutoincrement(true),
-
-            // The stream name, usually in the format "<BoundedContext>:<StreamName>"
-            (new Column('stream', Type::getType(Types::STRING)))
-                ->setLength(StreamName::MAX_LENGTH)
-                ->setPlatformOptions($isSQLite ? [] : ['charset' => 'ascii']),
-
-            // Version of the event in the respective stream
-            (new Column('version', Type::getType($isSQLite ? Types::INTEGER : Types::BIGINT)))
-                ->setUnsigned(true),
-
-            // The event type, often in the format "<BoundedContext>:<EventType>"
-            (new Column('type', Type::getType(Types::STRING)))
-                ->setLength(EventType::MAX_LENGTH)
-                ->setPlatformOptions($isSQLite ? [] : ['charset' => 'ascii']),
-
-            // The event payload, usually stored as JSON
-            (new Column('payload', Type::getType(Types::TEXT))),
-
-            // The event metadata stored as JSON
-            (new Column('metadata', Type::getType(Types::JSON)))
-                ->setNotnull(false),
-
-            // The unique event id, stored as UUID
-            (new Column('id', Type::getType(Types::STRING)))
-                ->setFixed(true)
-                ->setLength(EventId::MAX_LENGTH)
-                ->setPlatformOptions($isSQLite ? [] : ['charset' => 'ascii']),
-
-            // An optional causation id, usually a UUID
-            (new Column('causationid', Type::getType(Types::STRING)))
-                ->setNotnull(false)
-                ->setLength(CausationId::MAX_LENGTH)
-                ->setPlatformOptions($isSQLite ? [] : ['charset' => 'ascii']),
-
-            // An optional correlation id, usually a UUID
-            (new Column('correlationid', Type::getType(Types::STRING)))
-                ->setNotnull(false)
-                ->setLength(CorrelationId::MAX_LENGTH)
-                ->setPlatformOptions($isSQLite ? [] : ['charset' => 'ascii']),
-
-            // Timestamp of the event publishing
-            (new Column('recordedat', Type::getType(Types::DATETIME_IMMUTABLE))),
-        ]);
-
-        $table->setPrimaryKey(['sequencenumber']);
-        $table->addUniqueIndex(['id']);
-        $table->addUniqueIndex(['stream', 'version']);
-        $table->addIndex(['correlationid']);
-
-        $schemaConfiguration = $schemaManager->createSchemaConfig();
-        $schemaConfiguration->setDefaultTableOptions(['charset' => 'utf8mb4']);
-        return new Schema([$table], [], $schemaConfiguration);
-    }
-
-    /**
-     * @throws DriverException
-     * @throws DbalException
-     */
     private function getStreamVersion(StreamName $streamName): MaybeVersion
     {
-        $result = $this->connection->createQueryBuilder()
-            ->select('MAX(version)')
-            ->from($this->eventTableName)
-            ->where('stream = :streamName')
-            ->setParameter('streamName', $streamName->value)
-            ->executeQuery();
-        if (!$result instanceof Result) {
-            throw new \RuntimeException(sprintf('Failed to determine stream version of stream "%s"', $streamName->value), 1651153859);
-        }
-        $version = $result->fetchOne();
-        return MaybeVersion::fromVersionOrNull(is_numeric($version) ? Version::fromInteger((int)$version) : null);
+        $version = $this->connection
+            ->table($this->eventTableName)
+            ->where('stream', $streamName->value)
+            ->max('version');
+
+        return MaybeVersion::fromVersionOrNull(
+            is_numeric($version)
+                ? Version::fromInteger((int)$version)
+                : null
+        );
     }
 
-    /**
-     * @throws DbalException | UniqueConstraintViolationException| \JsonException
-     */
     private function commitEvent(StreamName $streamName, Event $event, Version $version): void
     {
-        $this->connection->insert(
-            $this->eventTableName,
-            [
+        $this->connection
+            ->table($this->eventTableName)
+            ->insert([
                 'id' => $event->id->value,
                 'stream' => $streamName->value,
                 'version' => $version->value,
@@ -284,21 +244,16 @@ final class LaravelEventStore implements EventStoreInterface
                 'causationid' => $event->causationId?->value,
                 'correlationid' => $event->correlationId?->value,
                 'recordedat' => $this->clock->now(),
-            ],
-            [
-                'version' => Types::BIGINT,
-                'recordedat' => Types::DATETIME_IMMUTABLE,
-            ]
-        );
+            ]);
     }
 
     private function reconnectDatabaseConnection(): void
     {
         try {
-            $this->connection->fetchOne('SELECT 1');
-        } catch (\Exception $_) {
-            $this->connection->close();
-            $this->connection->connect();
+            $this->connection->selectOne('SELECT 1');
+        } catch (\Throwable $_) {
+            $this->connection->disconnect();
+            $this->connection->reconnect();
         }
     }
 }

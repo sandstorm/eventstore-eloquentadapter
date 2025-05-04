@@ -1,9 +1,7 @@
 <?php
 declare(strict_types=1);
+namespace Sandstorm\EventStore\EloquentAdapter;
 
-namespace Sandstorm\EventStore\LaravelAdapter;
-
-use Illuminate\Database\Connection;
 use Illuminate\Database\Query\Builder;
 use Neos\EventStore\Model\Event;
 use Neos\EventStore\Model\Event\CausationId;
@@ -23,41 +21,41 @@ use RuntimeException;
 final class LaravelEventStream implements EventStreamInterface
 {
     private function __construct(
-        private Connection $connection,
-        private string $table,
-        private readonly ?SequenceNumber $minSeq = null,
-        private readonly ?SequenceNumber $maxSeq = null,
-        private readonly ?int $limit = null,
-        private readonly bool $backwards = false,
-    ) {}
-
-    public static function create(Connection $connection, string $table): self
-    {
-        return new self($connection, $table);
+        private Builder $queryBuilder,
+        private readonly ?SequenceNumber $minimumSequenceNumber,
+        private readonly ?SequenceNumber $maximumSequenceNumber,
+        private readonly ?int $limit,
+        private readonly bool $backwards,
+    ) {
     }
 
-    public function withMinimumSequenceNumber(SequenceNumber $seq): self
+    public static function create(Builder $queryBuilder): self
     {
-        if ($this->minSeq?->value === $seq->value) {
-            return $this;
-        }
-        return new self($this->connection, $this->table, $seq, $this->maxSeq, $this->limit, $this->backwards);
+        return new self($queryBuilder, null, null, null, false);
     }
 
-    public function withMaximumSequenceNumber(SequenceNumber $seq): self
+    public function withMinimumSequenceNumber(SequenceNumber $sequenceNumber): self
     {
-        if ($this->maxSeq?->value === $seq->value) {
+        if ($this->minimumSequenceNumber !== null && $sequenceNumber->value === $this->minimumSequenceNumber->value) {
             return $this;
         }
-        return new self($this->connection, $this->table, $this->minSeq, $seq, $this->limit, $this->backwards);
+        return new self($this->queryBuilder, $sequenceNumber, $this->maximumSequenceNumber, $this->limit, $this->backwards);
+    }
+
+    public function withMaximumSequenceNumber(SequenceNumber $sequenceNumber): self
+    {
+        if ($this->maximumSequenceNumber !== null && $sequenceNumber->value === $this->maximumSequenceNumber->value) {
+            return $this;
+        }
+        return new self($this->queryBuilder, $this->minimumSequenceNumber, $sequenceNumber, $this->limit, $this->backwards);
     }
 
     public function limit(int $limit): self
     {
-        if ($this->limit === $limit) {
+        if ($limit === $this->limit) {
             return $this;
         }
-        return new self($this->connection, $this->table, $this->minSeq, $this->maxSeq, $limit, $this->backwards);
+        return new self($this->queryBuilder, $this->minimumSequenceNumber, $this->maximumSequenceNumber, $limit, $this->backwards);
     }
 
     public function backwards(): self
@@ -65,59 +63,61 @@ final class LaravelEventStream implements EventStreamInterface
         if ($this->backwards) {
             return $this;
         }
-        return new self($this->connection, $this->table, $this->minSeq, $this->maxSeq, $this->limit, true);
+        return new self($this->queryBuilder, $this->minimumSequenceNumber, $this->maximumSequenceNumber, $this->limit, true);
     }
 
     public function getIterator(): \Traversable
     {
-        // build a fresh query each time
-        /** @var Builder $q */
-        $q = $this->connection->table($this->table);
+        $queryBuilder = clone $this->queryBuilder;
 
-        if ($this->minSeq !== null) {
-            $q->where('sequencenumber', '>=', $this->minSeq->value);
+        if ($this->minimumSequenceNumber !== null) {
+            $queryBuilder->where('sequencenumber', '>=', $this->minimumSequenceNumber->value);
         }
-        if ($this->maxSeq !== null) {
-            $q->where('sequencenumber', '<=', $this->maxSeq->value);
+        if ($this->maximumSequenceNumber !== null) {
+            $queryBuilder->where('sequencenumber', '<=', $this->maximumSequenceNumber->value);
         }
         if ($this->limit !== null) {
-            $q->limit($this->limit);
+            $queryBuilder->limit($this->limit);
         }
         if ($this->backwards) {
-            $q->orderBy('sequencenumber', 'desc');
+            $queryBuilder->orderBy('sequencenumber', 'desc');
         }
 
-        // handle reconnect if needed
-        try {
-            $this->connection->selectOne('SELECT 1');
-        } catch (\Throwable) {
-            $this->connection->disconnect();
-            $this->connection->reconnect();
-        }
+        $this->reconnectDatabaseConnection();
 
-        foreach ($q->get() as $row) {
+        foreach ($queryBuilder->get() as $row) {
             /** @var \stdClass $row */
-            $ts = DateTimeImmutable::createFromFormat('Y-m-d H:i:s', $row->recordedat);
-            if (! $ts) {
-                throw new RuntimeException(
-                    sprintf('Invalid recordedat "%s" for event %s', $row->recordedat, $row->id)
-                );
+            $recordedAt = DateTimeImmutable::createFromFormat('Y-m-d H:i:s', $row->recordedat);
+            if ($recordedAt === false) {
+                throw new RuntimeException(sprintf('Failed to parse "recordedat" value of "%s" in event "%s"', $row->recordedat, $row->id));
             }
-
             yield new EventEnvelope(
                 new Event(
                     EventId::fromString($row->id),
                     EventType::fromString($row->type),
                     EventData::fromString($row->payload),
-                    $row->metadata ? EventMetadata::fromJson($row->metadata) : null,
-                    $row->causationid ? CausationId::fromString($row->causationid) : null,
-                    $row->correlationid ? CorrelationId::fromString($row->correlationid) : null,
+                    isset($row->metadata) ? EventMetadata::fromJson($row->metadata) : null,
+                    isset($row->causationid) ? CausationId::fromString($row->causationid) : null,
+                    isset($row->correlationid) ? CorrelationId::fromString($row->correlationid) : null,
                 ),
                 StreamName::fromString($row->stream),
                 Version::fromInteger((int)$row->version),
                 SequenceNumber::fromInteger((int)$row->sequencenumber),
-                $ts
+                $recordedAt
             );
+        }
+    }
+
+    private function reconnectDatabaseConnection(): void
+    {
+        try {
+            $this->queryBuilder
+                ->getConnection()
+                ->selectOne('SELECT 1');
+        } catch (\Throwable $_) {
+            $conn = $this->queryBuilder->getConnection();
+            $conn->disconnect();
+            $conn->reconnect();
         }
     }
 }
