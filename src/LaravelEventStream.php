@@ -1,6 +1,6 @@
 <?php
 declare(strict_types=1);
-namespace Sandstorm\EventStore\EloquentAdapter;
+namespace Sandstorm\EventStore\LaravelAdapter;
 
 use Illuminate\Database\Query\Builder;
 use Neos\EventStore\Model\Event;
@@ -116,6 +116,7 @@ final class LaravelEventStream implements EventStreamInterface
                 ->selectOne('SELECT 1');
         } catch (\Throwable $_) {
             $conn = $this->queryBuilder->getConnection();
+            assert($conn instanceof \Illuminate\Database\Connection);
             $conn->disconnect();
             $conn->reconnect();
         }

@@ -1,7 +1,6 @@
 <?php
 declare(strict_types=1);
-
-namespace Neos\EventStore\DoctrineAdapter;
+namespace Sandstorm\EventStore\LaravelAdapter;
 
 use DateTimeImmutable;
 use Illuminate\Database\Connection as DbConnection;
@@ -26,7 +25,6 @@ use Neos\EventStore\Model\EventStream\VirtualStreamType;
 use Psr\Clock\ClockInterface;
 use RuntimeException;
 use Illuminate\Database\QueryException;
-use Sandstorm\EventStore\EloquentAdapter\LaravelEventStream as EloquentStream;
 
 final class LaravelEventStore implements EventStoreInterface
 {
@@ -36,8 +34,7 @@ final class LaravelEventStore implements EventStoreInterface
         private readonly DbConnection $connection,
         private readonly string       $eventTableName,
         ?ClockInterface               $clock = null
-    )
-    {
+    ) {
         $this->clock = $clock ?? new class implements ClockInterface {
             public function now(): DateTimeImmutable
             {
@@ -69,7 +66,7 @@ final class LaravelEventStore implements EventStoreInterface
         }
 
         return BatchEventStream::create(
-            EloquentStream::create($query),
+            LaravelEventStream::create($query),
             100
         );
     }
@@ -200,12 +197,12 @@ final class LaravelEventStore implements EventStoreInterface
                 $table->unsignedBigInteger('sequencenumber', true);
                 $table->string('stream', StreamName::MAX_LENGTH)->charset('ascii');
                 $table->unsignedBigInteger('version');
-                $table->string('type', EventType::MAX_LENGTH)->charset('ascii');
+                $table->string('type', Event\EventType::MAX_LENGTH)->charset('ascii');
                 $table->text('payload');
                 $table->json('metadata')->nullable();
-                $table->char('id', EventId::MAX_LENGTH);
-                $table->char('causationid', CausationId::MAX_LENGTH)->nullable();
-                $table->char('correlationid', CorrelationId::MAX_LENGTH)->nullable();
+                $table->char('id', Event\EventId::MAX_LENGTH);
+                $table->char('causationid', Event\CausationId::MAX_LENGTH)->nullable();
+                $table->char('correlationid', Event\CorrelationId::MAX_LENGTH)->nullable();
                 $table->timestamp('recordedat');
 
                 $table->primary('sequencenumber');

@@ -1,22 +1,22 @@
 <?php
 declare(strict_types=1);
+
 namespace Sandstorm\EventStore\LaravelAdapter\Tests\Integration;
 
-use Doctrine\DBAL\Connection;
-use Doctrine\DBAL\DriverManager;
-use Doctrine\DBAL\Exception as DbalException;
-use Doctrine\DBAL\Platforms\PostgreSQLPlatform;
-use Doctrine\DBAL\Platforms\SqlitePlatform;
-use Neos\EventStore\DoctrineAdapter\LaravelEventStore;
+use Illuminate\Database\Capsule\Manager as Capsule;
+use Illuminate\Database\Connection;
+use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Database\QueryException;
 use Neos\EventStore\EventStoreInterface;
 use Neos\EventStore\Model\EventStore\StatusType;
 use Neos\EventStore\Tests\Integration\AbstractEventStoreTestBase;
 use PHPUnit\Framework\Attributes\CoversClass;
+use Sandstorm\EventStore\LaravelAdapter\LaravelEventStore;
 
 #[CoversClass(LaravelEventStore::class)]
 final class LaravelEventStoreTest extends AbstractEventStoreTestBase
 {
-    private static ?Connection $connection = null;
+    private static ?Capsule $capsule = null;
 
     protected static function createEventStore(): EventStoreInterface
     {
@@ -25,30 +25,26 @@ final class LaravelEventStoreTest extends AbstractEventStoreTestBase
 
     protected static function resetEventStore(): void
     {
-        $connection = self::connection();
-        if (!$connection->getSchemaManager()->tablesExist([self::eventTableName()])) {
-            return;
-        }
-        if ($connection->getDatabasePlatform() instanceof SqlitePlatform) {
-            $connection->executeStatement('DELETE FROM ' . self::eventTableName());
-            $connection->executeStatement('UPDATE SQLITE_SEQUENCE SET SEQ=0 WHERE NAME="' . self::eventTableName() . '"');
-        } elseif ($connection->getDatabasePlatform() instanceof PostgreSQLPlatform) {
-            $connection->executeStatement('TRUNCATE TABLE ' . self::eventTableName() . ' RESTART IDENTITY');
-        } else {
-            $connection->executeStatement('TRUNCATE TABLE ' . self::eventTableName());
+        $schema = self::connection()->getSchemaBuilder();
+        if ($schema->hasTable(self::eventTableName())) {
+            $schema->drop(self::eventTableName());
         }
     }
 
     public static function connection(): Connection
     {
-        if (self::$connection === null) {
-            $dsn = getenv('DB_DSN');
-            if (!is_string($dsn)) {
-                $dsn = 'sqlite:///events_test.sqlite';
-            }
-            self::$connection = DriverManager::getConnection(['url' => $dsn]);
+        if (self::$capsule === null) {
+            $capsule = new Capsule();
+            $capsule->addConnection([
+                'driver'   => 'sqlite',
+                'database' => __DIR__ . '/../events_test.sqlite',
+                'prefix'   => '',
+            ], 'default');
+            $capsule->setAsGlobal();
+            $capsule->bootEloquent();
+            self::$capsule = $capsule;
         }
-        return self::$connection;
+        return self::$capsule->getConnection();
     }
 
     public static function eventTableName(): string
@@ -58,41 +54,67 @@ final class LaravelEventStoreTest extends AbstractEventStoreTestBase
 
     public function test_setup_throws_exception_if_database_connection_fails(): void
     {
-        $connection = DriverManager::getConnection(['url' => 'mysql://invalid-connection']);
-        $eventStore = new LaravelEventStore($connection, self::eventTableName());
+        $bad = new Capsule();
+        $bad->addConnection([
+            'driver'   => 'mysql',
+            'host'     => 'invalid-host',
+            'database' => 'does_not_exist',
+            'username' => 'foo',
+            'password' => 'bar',
+        ], 'bad');
+        $bad->setAsGlobal();
+        $bad->bootEloquent();
+        $conn = $bad->getConnection('bad');
 
-        $this->expectException(DbalException::class);
+        $eventStore = new LaravelEventStore($conn, self::eventTableName());
+        $this->expectException(QueryException::class);
         $eventStore->setup();
     }
 
     public function test_status_returns_error_status_if_database_connection_fails(): void
     {
-        $connection = DriverManager::getConnection(['url' => 'mysql://invalid-connection']);
-        $eventStore = new LaravelEventStore($connection, self::eventTableName());
-        self::assertSame($eventStore->status()->type, StatusType::ERROR);
+        $bad = new Capsule();
+        $bad->addConnection([
+            'driver'   => 'mysql',
+            'host'     => 'invalid-host',
+            'database' => 'does_not_exist',
+            'username' => 'foo',
+            'password' => 'bar',
+        ], 'bad');
+        $bad->setAsGlobal();
+        $bad->bootEloquent();
+        $conn = $bad->getConnection('bad');
+
+        $eventStore = new LaravelEventStore($conn, self::eventTableName());
+        $this->assertSame(StatusType::ERROR, $eventStore->status()->type);
     }
 
     public function test_status_returns_setup_required_status_if_event_table_is_missing(): void
     {
-        $connection = DriverManager::getConnection(['url' => 'sqlite:///:memory:']);
-        $eventStore = new LaravelEventStore($connection, self::eventTableName());
-        self::assertSame($eventStore->status()->type, StatusType::SETUP_REQUIRED);
+        $conn = self::connection();
+        $eventStore = new LaravelEventStore($conn, self::eventTableName());
+        $this->assertSame(StatusType::SETUP_REQUIRED, $eventStore->status()->type);
     }
 
     public function test_status_returns_setup_required_status_if_event_table_requires_update(): void
     {
-        $connection = self::connection();
-        $eventStore = new LaravelEventStore($connection, self::eventTableName());
+        $conn = self::connection();
+        $eventStore = new LaravelEventStore($conn, self::eventTableName());
         $eventStore->setup();
-        $connection->executeStatement('ALTER TABLE ' . self::eventTableName() . ' RENAME COLUMN metadata TO metadata_renamed');
-        self::assertSame($eventStore->status()->type, StatusType::SETUP_REQUIRED);
+
+        // Rename one column to simulate a schema drift
+        $conn->getSchemaBuilder()->table(self::eventTableName(), function (Blueprint $table) {
+            $table->renameColumn('metadata', 'metadata_renamed');
+        });
+
+        $this->assertSame(StatusType::SETUP_REQUIRED, $eventStore->status()->type);
     }
 
     public function test_status_returns_ok_status_if_event_table_is_up_to_date(): void
     {
-        $connection = self::connection();
-        $eventStore = new LaravelEventStore($connection, self::eventTableName());
+        $conn = self::connection();
+        $eventStore = new LaravelEventStore($conn, self::eventTableName());
         $eventStore->setup();
-        self::assertSame($eventStore->status()->type, StatusType::OK);
+        $this->assertSame(StatusType::OK, $eventStore->status()->type);
     }
 }
