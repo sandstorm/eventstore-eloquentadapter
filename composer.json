@@ -1,18 +1,12 @@
 {
-    "name": "neos/eventstore-doctrineadapter",
-    "description": "Doctrine DBAL based implementation for the neos/eventstore",
+    "name": "sandstorm/eventstore-laraveladapter",
+    "description": "Laravel DB based implementation for the neos/eventstore",
     "type": "library",
     "license": "MIT",
-    "funding": [
-        {
-            "type": "other",
-            "url": "https://www.neos.io/community/participate/supporting-neos.html"
-        }
-    ],
     "require": {
         "php": "^8.1",
         "neos/eventstore": "^1",
-        "doctrine/dbal": "^3",
+        "laravel/framework": "^11",
         "webmozart/assert": "^1.10",
         "psr/clock": "^1"
     },
@@ -25,12 +19,12 @@
     },
     "autoload": {
         "psr-4": {
-            "Neos\\EventStore\\DoctrineAdapter\\": "src/"
+            "Sandstorm\\EventStore\\LaravelAdapter\\": "src/"
         }
     },
     "autoload-dev": {
         "psr-4": {
-            "Neos\\EventStore\\DoctrineAdapter\\Tests\\": "tests/",
+            "Sandstorm\\EventStore\\LaravelAdapter\\Tests\\": "tests/",
             "Neos\\EventStore\\Tests\\": "vendor/neos/eventstore/tests/"
         }
     },
@@ -40,9 +34,9 @@
         "test:cs:fix": "phpcbf --colors src",
         "test:integration": "phpunit tests/Integration --exclude-group=parallel",
         "test:consistency": [
-            "Neos\\EventStore\\DoctrineAdapter\\Tests\\Integration\\DoctrineEventStoreTest::consistency_prepare",
+            "Sandstorm\\EventStore\\LaravelAdapter\\Tests\\Integration\\DoctrineEventStoreTest::consistency_prepare",
             "paratest tests/Integration --group=parallel --functional --processes 10",
-            "Neos\\EventStore\\DoctrineAdapter\\Tests\\Integration\\DoctrineEventStoreTest::consistency_validateEvents"
+            "Sandstorm\\EventStore\\LaravelAdapter\\Tests\\Integration\\DoctrineEventStoreTest::consistency_validateEvents"
         ],
         "test": [
             "@test:phpstan",
