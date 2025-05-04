@@ -1,6 +1,6 @@
 <?php
 declare(strict_types=1);
-namespace Neos\EventStore\DoctrineAdapter\Tests\Integration;
+namespace Sandstorm\EventStore\LaravelAdapter\Tests\Integration;
 
 use Doctrine\DBAL\Connection;
 use Doctrine\DBAL\DriverManager;
@@ -14,7 +14,7 @@ use Neos\EventStore\Tests\Integration\AbstractEventStoreTestBase;
 use PHPUnit\Framework\Attributes\CoversClass;
 
 #[CoversClass(LaravelEventStore::class)]
-final class DoctrineEventStoreTest extends AbstractEventStoreTestBase
+final class LaravelEventStoreTest extends AbstractEventStoreTestBase
 {
     private static ?Connection $connection = null;
 
