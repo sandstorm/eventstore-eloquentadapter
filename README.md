@@ -38,6 +38,8 @@ Contributions in the form of [issues](https://github.com/neos/eventstore-doctrin
 ```bash
 # in this directory:
 composer install
+docker compose up -d
+DB_DRIVER=mysql composer test
 ```
 
 ## License

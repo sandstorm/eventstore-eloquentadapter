@@ -1,0 +1,9 @@
+services:
+  mysql:
+    image: mysql:latest
+    environment:
+      MYSQL_ALLOW_EMPTY_PASSWORD: false
+      MYSQL_ROOT_PASSWORD: password
+      MYSQL_DATABASE: eventstore_test
+    ports:
+      - 3309:3306

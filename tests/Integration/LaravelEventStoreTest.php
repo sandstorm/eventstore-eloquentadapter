@@ -17,24 +17,6 @@ use Sandstorm\EventStore\LaravelAdapter\LaravelEventStore;
 
 require_once __DIR__ . '/../../vendor/autoload.php';
 
-class TestApplication extends Container
-{
-    public function basePath(string $path = ''): string
-    {
-        // point this at your package root (or test root) so that SQLite can write its files
-        $root = __DIR__ . '/..';
-        return $path ? $root . DIRECTORY_SEPARATOR . $path : $root;
-    }
-
-    public function databasePath(string $path = ''): string
-    {
-        // if you want SQLite files under "database/"
-        $db = $this->basePath('database');
-        return $path ? $db . DIRECTORY_SEPARATOR . $path : $db;
-    }
-}
-
-
 #[CoversClass(LaravelEventStore::class)]
 final class LaravelEventStoreTest extends AbstractEventStoreTestBase
 {
@@ -45,34 +27,68 @@ final class LaravelEventStoreTest extends AbstractEventStoreTestBase
         return new LaravelEventStore(self::connection(), self::eventTableName());
     }
 
+
     protected static function resetEventStore(): void
     {
-        unlink(__DIR__ . '/../events_test.sqlite');
+        $connection = self::connection();
+
+        // If the table doesn’t exist, bail early
+        if (!$connection->getSchemaBuilder()->hasTable(self::eventTableName())) {
+            return;
+        }
+
+        $table = self::eventTableName();
+        $driver = $connection->getDriverName();
+
+        if ($driver === 'sqlite') {
+            // SQLite: delete all rows & reset autoincrement
+            $connection->statement('DELETE FROM ' . $table);
+            $connection->statement(
+                'UPDATE SQLITE_SEQUENCE SET seq = 0 WHERE name = ?',
+                [ $table ]
+            );
+        } elseif ($driver === 'pgsql') {
+            // Postgres: truncate and restart identity
+            $connection->statement(
+                'TRUNCATE TABLE ' . $table . ' RESTART IDENTITY'
+            );
+        } else {
+            // MySQL, SQL Server, etc.
+            $connection->statement('TRUNCATE TABLE ' . $table);
+        }
     }
+
 
     public static function connection(): Connection
     {
         if (self::$capsule === null) {
-
-            // 1) replace the global container
-            Container::setInstance(new TestApplication());
-
-            $path = __DIR__ . '/../events_test.sqlite';
-            if (!file_exists($path)) {
-                touch($path);
+            $dbDriver = getenv('DB_DRIVER');
+            if ($dbDriver !== 'mysql') {
+                throw new \RuntimeException('Currently only MySQL is supported for testing. Set DB_DRIVER=mysql to run tests.');
             }
+
+            /*for SQLITE: $path = __DIR__ . '/../events_test.sqlite';
+            if (!file_exists($path)) {
+                echo("!!!!!!!!!! CREATING");
+                touch($path);
+            }*/
 
             $capsule = new Capsule();
             $capsule->addConnection([
-                'driver'   => 'sqlite',
-                'database' => $path,
+                'driver'   => $dbDriver,
+                'database' => getenv('DB_DATABASE') ?: 'eventstore_test',
+                'host' => '127.0.0.1',
+                'port' => '3309',
+                'username' => getenv('DB_USER') ?: 'root',
+                'password' => getenv('DB_PASSWORD') ?: 'password',
                 'prefix'   => '',
             ], 'default');
-            $capsule->setAsGlobal();
-            $capsule->bootEloquent();
             self::$capsule = $capsule;
         }
-        return self::$capsule->getConnection();
+        $connection = self::$capsule->getConnection();
+        //$connection->unprepared('PRAGMA journal_mode = WAL;');
+        //$connection->unprepared('PRAGMA busy_timeout = 5000;');
+        return $connection;
     }
 
     public static function eventTableName(): string
@@ -145,4 +161,6 @@ final class LaravelEventStoreTest extends AbstractEventStoreTestBase
         $eventStore->setup();
         $this->assertSame(StatusType::OK, $eventStore->status()->type);
     }
+
+    // TODO: PROBLEM WITH abstract protected static function resetEventStore(): void; ??
 }

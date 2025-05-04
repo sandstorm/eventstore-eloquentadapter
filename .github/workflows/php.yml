@@ -65,8 +65,9 @@ jobs:
 
     - name: Run tests (SQLIte)
       run: composer run-script test
-      env:
-        DB_DSN: "sqlite:///events_test.sqlite"
+# TODO FIX ME      env:
+#        DB_DRIVER: "sqlite"
+#        DB_DATABASE: "events_test.sqlite"
 
     - name: Run tests (MySQL)
       run: composer run-script test
