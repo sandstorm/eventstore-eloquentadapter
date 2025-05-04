@@ -1,6 +1,6 @@
 <?php
 declare(strict_types=1);
-namespace Neos\EventStore\DoctrineAdapter;
+namespace Sandstorm\EventStore\LaravelAdapter;
 
 use DateTimeImmutable;
 use Doctrine\DBAL\Connection;
@@ -41,7 +41,7 @@ use Neos\EventStore\Model\EventStream\VirtualStreamName;
 use Neos\EventStore\Model\EventStream\VirtualStreamType;
 use Psr\Clock\ClockInterface;
 
-final class DoctrineEventStore implements EventStoreInterface
+final class LaravelEventStore implements EventStoreInterface
 {
     private readonly ClockInterface $clock;
 
