@@ -3,6 +3,8 @@ declare(strict_types=1);
 
 namespace Sandstorm\EventStore\LaravelAdapter\Tests\Integration;
 
+use Illuminate\Config\Repository;
+use Illuminate\Container\Container;
 use Illuminate\Database\Capsule\Manager as Capsule;
 use Illuminate\Database\Connection;
 use Illuminate\Database\Schema\Blueprint;
@@ -12,6 +14,26 @@ use Neos\EventStore\Model\EventStore\StatusType;
 use Neos\EventStore\Tests\Integration\AbstractEventStoreTestBase;
 use PHPUnit\Framework\Attributes\CoversClass;
 use Sandstorm\EventStore\LaravelAdapter\LaravelEventStore;
+
+require_once __DIR__ . '/../../vendor/autoload.php';
+
+class TestApplication extends Container
+{
+    public function basePath(string $path = ''): string
+    {
+        // point this at your package root (or test root) so that SQLite can write its files
+        $root = __DIR__ . '/..';
+        return $path ? $root . DIRECTORY_SEPARATOR . $path : $root;
+    }
+
+    public function databasePath(string $path = ''): string
+    {
+        // if you want SQLite files under "database/"
+        $db = $this->basePath('database');
+        return $path ? $db . DIRECTORY_SEPARATOR . $path : $db;
+    }
+}
+
 
 #[CoversClass(LaravelEventStore::class)]
 final class LaravelEventStoreTest extends AbstractEventStoreTestBase
@@ -25,19 +47,25 @@ final class LaravelEventStoreTest extends AbstractEventStoreTestBase
 
     protected static function resetEventStore(): void
     {
-        $schema = self::connection()->getSchemaBuilder();
-        if ($schema->hasTable(self::eventTableName())) {
-            $schema->drop(self::eventTableName());
-        }
+        unlink(__DIR__ . '/../events_test.sqlite');
     }
 
     public static function connection(): Connection
     {
         if (self::$capsule === null) {
+
+            // 1) replace the global container
+            Container::setInstance(new TestApplication());
+
+            $path = __DIR__ . '/../events_test.sqlite';
+            if (!file_exists($path)) {
+                touch($path);
+            }
+
             $capsule = new Capsule();
             $capsule->addConnection([
                 'driver'   => 'sqlite',
-                'database' => __DIR__ . '/../events_test.sqlite',
+                'database' => $path,
                 'prefix'   => '',
             ], 'default');
             $capsule->setAsGlobal();

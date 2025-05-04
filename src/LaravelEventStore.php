@@ -179,39 +179,76 @@ final class LaravelEventStore implements EventStoreInterface
 
         /** @var SchemaBuilder $schema */
         $schema = $this->connection->getSchemaBuilder();
-        if (!$schema->hasTable($this->eventTableName)) {
+        if (! $schema->hasTable($this->eventTableName)) {
             return Status::setupRequired(
                 sprintf('Table `%s` does not exist.', $this->eventTableName)
+            );
+        }
+
+        // detect schema drift: make sure all the columns we created in setup() are still here
+        $actual = $schema->getColumnListing($this->eventTableName);
+        $expected = [
+            'sequencenumber',
+            'stream',
+            'version',
+            'type',
+            'payload',
+            'metadata',
+            'id',
+            'causationid',
+            'correlationid',
+            'recordedat',
+        ];
+
+        if (count(array_diff($expected, $actual)) > 0) {
+            return Status::setupRequired(
+                sprintf('Table `%s` requires schema update.', $this->eventTableName)
             );
         }
 
         return Status::ok();
     }
 
+
     public function setup(): void
     {
         /** @var SchemaBuilder $schema */
         $schema = $this->connection->getSchemaBuilder();
-        if (!$schema->hasTable($this->eventTableName)) {
+
+        if (! $schema->hasTable($this->eventTableName)) {
             $schema->create($this->eventTableName, function (Blueprint $table) {
-                $table->unsignedBigInteger('sequencenumber', true);
-                $table->string('stream', StreamName::MAX_LENGTH)->charset('ascii');
+                // == PRIMARY KEY ==
+                // bigIncrements on MySQL => BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY
+                // on SQLite Laravel will collapse it to INTEGER PRIMARY KEY AUTOINCREMENT
+                $table->bigIncrements('sequencenumber');
+
+                // == COLUMNS ==
+                $table->string('stream', StreamName::MAX_LENGTH)
+                    ->charset('ascii');
                 $table->unsignedBigInteger('version');
-                $table->string('type', Event\EventType::MAX_LENGTH)->charset('ascii');
+                $table->string('type', Event\EventType::MAX_LENGTH)
+                    ->charset('ascii');
                 $table->text('payload');
                 $table->json('metadata')->nullable();
-                $table->char('id', Event\EventId::MAX_LENGTH);
-                $table->char('causationid', Event\CausationId::MAX_LENGTH)->nullable();
-                $table->char('correlationid', Event\CorrelationId::MAX_LENGTH)->nullable();
-                $table->timestamp('recordedat');
+                $table->char('id', Event\EventId::MAX_LENGTH)
+                    ->charset('ascii')
+                    ->unique();
+                $table->char('causationid', Event\CausationId::MAX_LENGTH)
+                    ->charset('ascii')
+                    ->nullable();
+                $table->char('correlationid', Event\CorrelationId::MAX_LENGTH)
+                    ->charset('ascii')
+                    ->nullable();
+                // Doctrine used DATETIME, so use dateTime() here (not timestamp)
+                $table->dateTime('recordedat');
 
-                $table->primary('sequencenumber');
-                $table->unique('id');
+                // == INDEXES ==
                 $table->unique(['stream', 'version']);
                 $table->index('correlationid');
             });
         }
     }
+
 
     private function getStreamVersion(StreamName $streamName): MaybeVersion
     {

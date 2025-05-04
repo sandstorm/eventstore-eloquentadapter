@@ -15,7 +15,8 @@
         "phpstan/phpstan": "^1.10",
         "squizlabs/php_codesniffer": "^4.0.x-dev",
         "phpunit/phpunit": "^10",
-        "brianium/paratest": "^7.2"
+        "brianium/paratest": "^7.2",
+        "illuminate/support": "^11"
     },
     "autoload": {
         "psr-4": {
@@ -34,9 +35,9 @@
         "test:cs:fix": "phpcbf --colors src",
         "test:integration": "phpunit tests/Integration --exclude-group=parallel",
         "test:consistency": [
-            "Sandstorm\\EventStore\\LaravelAdapter\\Tests\\Integration\\DoctrineEventStoreTest::consistency_prepare",
+            "Sandstorm\\EventStore\\LaravelAdapter\\Tests\\Integration\\LaravelEventStoreTest::consistency_prepare",
             "paratest tests/Integration --group=parallel --functional --processes 10",
-            "Sandstorm\\EventStore\\LaravelAdapter\\Tests\\Integration\\DoctrineEventStoreTest::consistency_validateEvents"
+            "Sandstorm\\EventStore\\LaravelAdapter\\Tests\\Integration\\LaravelEventStoreTest::consistency_validateEvents"
         ],
         "test": [
             "@test:phpstan",
